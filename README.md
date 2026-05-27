@@ -1,0 +1,1 @@
+Tool to help users create and delete worktrees for repositories.
