@@ -1,0 +1,44 @@
+{
+  "name": "repobinder",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.1.2",
+  "description": "A desktop-first tool for creating and deleting Git worktrees.",
+  "main": "dist/desktop/main.js",
+  "scripts": {
+    "build": "pnpm run build:web && pnpm run build:server && pnpm run build:desktop",
+    "build:web": "vite build --config apps/web/vite.config.ts",
+    "build:server": "tsc -p apps/server/tsconfig.json",
+    "build:desktop": "tsc -p apps/desktop/tsconfig.json",
+    "clean": "rimraf dist dist-web",
+    "desktop": "electron dist/desktop/main.js",
+    "desktop:remote": "cross-env REPOBINDER_REMOTE=1 electron dist/desktop/main.js",
+    "dev": "pnpm run build && pnpm run desktop",
+    "dev:remote": "pnpm run build && pnpm run desktop:remote",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc -p apps/web/tsconfig.json --noEmit && tsc -p apps/server/tsconfig.json --noEmit && tsc -p apps/desktop/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.3.4",
+    "cross-env": "^7.0.3",
+    "electron": "^42.3.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
