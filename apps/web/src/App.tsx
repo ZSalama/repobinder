@@ -88,6 +88,43 @@ type AppStateResource = {
   operations: unknown[];
 };
 
+type NewWorktreeContext = {
+  repositoryId: string;
+  primaryWorktreePath: string;
+  baseBranch?: string;
+  detached: boolean;
+  dirty: boolean;
+};
+
+type BatchRowResult = {
+  index: number;
+  branchName: string;
+  worktreePath: string;
+  status: "created" | "failed";
+  error?: string;
+};
+
+type BatchResult = {
+  baseBranch: string;
+  dirty: boolean;
+  created: number;
+  failed: number;
+  warnings: string[];
+  rows: BatchRowResult[];
+};
+
+type BatchResponse = {
+  state: AppStateResource;
+  result: BatchResult;
+};
+
+type BatchValidationRow = {
+  index: number;
+  branchName: string;
+  worktreePath: string;
+  errors: string[];
+};
+
 type ServerInfo = {
   name: string;
   host: string;
@@ -133,6 +170,11 @@ export function App(): JSX.Element {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | undefined>();
+  const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
+  const [newWorktreeContext, setNewWorktreeContext] = useState<NewWorktreeContext | undefined>();
+  const [newWorktreeLoading, setNewWorktreeLoading] = useState(false);
+  const [newWorktreeRows, setNewWorktreeRows] = useState<string[]>([""]);
+  const [newWorktreeRowErrors, setNewWorktreeRowErrors] = useState<Record<number, string[]>>({});
 
   const selectedRepository = useMemo(() => {
     if (!appState) {
@@ -359,6 +401,108 @@ export function App(): JSX.Element {
     }
   }
 
+  async function openNewWorktree(): Promise<void> {
+    if (!selectedRepository) {
+      return;
+    }
+
+    setNewWorktreeRows([""]);
+    setNewWorktreeRowErrors({});
+    setNewWorktreeContext(undefined);
+    setNewWorktreeOpen(true);
+    setNewWorktreeLoading(true);
+
+    try {
+      const context = await api<NewWorktreeContext>(
+        `/api/repositories/${selectedRepository.repositoryId}/new-worktree-context`,
+      );
+      setNewWorktreeContext(context);
+    } catch (error) {
+      setNewWorktreeOpen(false);
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
+    } finally {
+      setNewWorktreeLoading(false);
+    }
+  }
+
+  function updateNewWorktreeRow(index: number, value: string): void {
+    setNewWorktreeRows((rows) => rows.map((row, rowIndex) => (rowIndex === index ? value : row)));
+  }
+
+  function addNewWorktreeRow(): void {
+    setNewWorktreeRows((rows) => (rows.length >= 5 ? rows : [...rows, ""]));
+  }
+
+  function removeNewWorktreeRow(index: number): void {
+    setNewWorktreeRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
+    setNewWorktreeRowErrors({});
+  }
+
+  async function submitNewWorktree(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    if (!selectedRepository) {
+      return;
+    }
+
+    setBusyAction("worktree.create-batch");
+    setBanner(undefined);
+    setNewWorktreeRowErrors({});
+
+    try {
+      const response = await fetch(`/api/repositories/${selectedRepository.repositoryId}/worktrees`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: newWorktreeRows.map((branchName) => ({ branchName })) }),
+      });
+      const body = (await response.json().catch(() => undefined)) as
+        | (BatchResponse & { error?: string; rows?: BatchValidationRow[] })
+        | undefined;
+
+      if (!response.ok) {
+        if (response.status === 400 && Array.isArray(body?.rows)) {
+          const errors: Record<number, string[]> = {};
+
+          for (const row of body.rows) {
+            errors[row.index] = row.errors;
+          }
+
+          setNewWorktreeRowErrors(errors);
+          setBanner({ tone: "danger", text: body?.error ?? "New Worktree validation failed" });
+          return;
+        }
+
+        throw new Error(typeof body?.error === "string" ? body.error : response.statusText);
+      }
+
+      if (body?.state) {
+        setAppState(body.state);
+      }
+
+      setNewWorktreeOpen(false);
+
+      const result = body?.result;
+
+      if (!result || result.failed === 0) {
+        setBanner({
+          tone: "success",
+          text: `Created ${result?.created ?? 0} Linked Worktree${result?.created === 1 ? "" : "s"}`,
+        });
+      } else if (result.created === 0) {
+        setBanner({ tone: "danger", text: "No Linked Worktrees were created" });
+      } else {
+        setBanner({
+          tone: "warning",
+          text: `Created ${result.created} of ${result.created + result.failed}; ${result.failed} failed`,
+        });
+      }
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
+    } finally {
+      setBusyAction(undefined);
+    }
+  }
+
   if (loadFailure) {
     return (
       <main className="bootScreen">
@@ -435,6 +579,15 @@ export function App(): JSX.Element {
               onClick={() => void refreshState()}
             >
               <RefreshCw size={18} className={busyAction === "refresh" ? "spin" : undefined} />
+            </button>
+            <button
+              className="primaryButton"
+              type="button"
+              disabled={!selectedRepository || isBusy}
+              onClick={() => void openNewWorktree()}
+            >
+              <Plus size={17} />
+              <span>New Worktree</span>
             </button>
             <button
               className="secondaryButton"
@@ -594,6 +747,119 @@ export function App(): JSX.Element {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      ) : null}
+
+      {newWorktreeOpen && selectedRepository ? (
+        <div className="sheetLayer" role="presentation" onMouseDown={() => setNewWorktreeOpen(false)}>
+          <section
+            className="settingsSheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-worktree-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="sheetHeader">
+              <div>
+                <p className="eyebrow">{selectedRepository.displayName}</p>
+                <h2 id="new-worktree-title">New Worktree</h2>
+              </div>
+              <button className="iconButton" type="button" aria-label="Close" onClick={() => setNewWorktreeOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {newWorktreeLoading ? (
+              <div className="sheetLoading" aria-label="Loading New Worktree context">
+                <RefreshCw size={20} className="spin" />
+              </div>
+            ) : (
+              <form className="settingsForm" onSubmit={(event) => void submitNewWorktree(event)}>
+                {newWorktreeContext?.detached ? (
+                  <BannerMessage
+                    tone="warning"
+                    text="The Primary Worktree is in a detached HEAD state. Check out a Branch to create new Linked Worktrees."
+                    icon={<AlertTriangle size={17} />}
+                  />
+                ) : (
+                  <div className="baseBranchRow">
+                    <span className="fieldLabel">Base Branch</span>
+                    <code className="baseBranchValue">
+                      <GitBranch size={14} />
+                      {newWorktreeContext?.baseBranch ?? "Unknown"}
+                    </code>
+                  </div>
+                )}
+
+                {newWorktreeContext?.dirty ? (
+                  <BannerMessage
+                    tone="warning"
+                    text="The Primary Worktree has uncommitted changes. They will not be copied into the new Linked Worktrees."
+                    icon={<AlertTriangle size={17} />}
+                  />
+                ) : null}
+
+                <div className="branchRowList">
+                  {newWorktreeRows.map((row, index) => (
+                    <div className="branchRow" key={index}>
+                      <label className="fieldStack">
+                        <span>{index === 0 ? "Branch name (required)" : `Branch name ${index + 1}`}</span>
+                        <div className="branchRowInput">
+                          <input
+                            value={row}
+                            onChange={(event) => updateNewWorktreeRow(index, event.target.value)}
+                            placeholder={index === 0 ? "feature/search" : `auto: ${newWorktreeRows[0] || "branch"}-${index + 1}`}
+                            aria-invalid={(newWorktreeRowErrors[index]?.length ?? 0) > 0}
+                          />
+                          {index > 0 ? (
+                            <button
+                              className="iconButton"
+                              type="button"
+                              aria-label={`Remove Branch row ${index + 1}`}
+                              onClick={() => removeNewWorktreeRow(index)}
+                            >
+                              <X size={16} />
+                            </button>
+                          ) : null}
+                        </div>
+                      </label>
+                      {(newWorktreeRowErrors[index] ?? []).map((error, errorIndex) => (
+                        <p className="rowError" key={errorIndex}>
+                          {error}
+                        </p>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                {newWorktreeRows.length < 5 ? (
+                  <button className="secondaryButton" type="button" onClick={addNewWorktreeRow}>
+                    <Plus size={16} />
+                    <span>Add Worktree row</span>
+                  </button>
+                ) : null}
+
+                <div className="sheetActions">
+                  <button
+                    className="secondaryButton"
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => setNewWorktreeOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="primaryButton inlineButton"
+                    type="submit"
+                    disabled={isBusy || newWorktreeContext?.detached || !newWorktreeRows[0]?.trim()}
+                  >
+                    <Plus size={17} />
+                    <span>Create</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </section>
         </div>
       ) : null}

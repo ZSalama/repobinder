@@ -779,6 +779,72 @@ button:focus-visible {
   accent-color: var(--green);
 }
 
+.sheetLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.baseBranchRow {
+  display: grid;
+  gap: 7px;
+}
+
+.fieldLabel {
+  color: var(--foreground);
+  font-size: 0.88rem;
+  font-weight: 720;
+}
+
+.baseBranchValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 4%);
+  color: var(--green);
+  font-size: 0.88rem;
+  font-weight: 720;
+  overflow-wrap: anywhere;
+}
+
+.branchRowList {
+  display: grid;
+  gap: 14px;
+}
+
+.branchRow {
+  display: grid;
+  gap: 6px;
+}
+
+.branchRowInput {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.branchRowInput input {
+  flex: 1;
+  min-width: 0;
+}
+
+.branchRowInput input[aria-invalid="true"] {
+  border-color: var(--red, #f87171);
+}
+
+.rowError {
+  margin: 0;
+  color: var(--red, #f87171);
+  font-size: 0.8rem;
+  font-weight: 640;
+  overflow-wrap: anywhere;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }

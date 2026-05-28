@@ -58,6 +58,21 @@ type RepositoryInspection = {
   branches: string[];
 };
 
+type BatchRow = {
+  index: number;
+  branchName: string;
+  worktreePath: string;
+};
+
+type BatchRowValidation = BatchRow & {
+  errors: string[];
+};
+
+type BatchRowOutcome = BatchRow & {
+  status: "created" | "failed";
+  error?: string;
+};
+
 type SocketMessage =
   | {
       type: "server.ready";
@@ -526,6 +541,214 @@ app.post("/api/repositories/:repositoryId/worktrees/existing", async (request, r
         repositoryId,
         details: compactJsonObject({
           worktreePath: requestedWorktreePath,
+          error: toApiError(error).message,
+        }),
+      });
+    }
+
+    next(error);
+  }
+});
+
+app.get("/api/repositories/:repositoryId/new-worktree-context", async (request, response, next) => {
+  try {
+    const repositoryId = readRouteParam(request, "repositoryId");
+    const store = await localStore.read();
+    const repository = findVisibleRepository(store, repositoryId);
+    const inspection = await inspectRepository(repository.primaryWorktreePath);
+    const primaryEntry = findInspectedWorktree(inspection, inspection.realRepositoryPath);
+    const detached = !primaryEntry || primaryEntry.detached || !primaryEntry.branch;
+    const dirty = await isWorktreeDirty(repository.primaryWorktreePath);
+
+    response.json({
+      repositoryId,
+      primaryWorktreePath: repository.primaryWorktreePath,
+      baseBranch: detached ? undefined : primaryEntry?.branch,
+      detached,
+      dirty,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/repositories/:repositoryId/worktrees", async (request, response, next) => {
+  const repositoryId = readRouteParam(request, "repositoryId");
+
+  try {
+    const requestedNames = readNewWorktreeRows(request.body);
+    const store = await localStore.read();
+    const repository = findVisibleRepository(store, repositoryId);
+    const inspection = await inspectRepository(repository.primaryWorktreePath);
+    const primaryEntry = findInspectedWorktree(inspection, inspection.realRepositoryPath);
+
+    if (!primaryEntry || primaryEntry.detached || !primaryEntry.branch) {
+      throw new ApiError(400, "New Worktree requires the Primary Worktree to have a checked-out Branch");
+    }
+
+    const baseBranch = primaryEntry.branch;
+    const resolvedRows = resolveBatchRows(requestedNames, repository.primaryWorktreePath);
+    const validation = await validateBatchRows(resolvedRows, inspection, store);
+
+    if (validation.some((row) => row.errors.length > 0)) {
+      response.status(400).json({ error: "New Worktree validation failed", rows: validation });
+      return;
+    }
+
+    const dirty = await isWorktreeDirty(repository.primaryWorktreePath);
+
+    const result = await runExclusiveMutation("worktree.create-batch", async () => {
+      const outcomes: BatchRowOutcome[] = [];
+
+      for (const row of resolvedRows) {
+        try {
+          await runGit(inspection.repositoryPath, [
+            "worktree",
+            "add",
+            "-b",
+            row.branchName,
+            row.worktreePath,
+            baseBranch,
+          ]);
+          outcomes.push({ index: row.index, branchName: row.branchName, worktreePath: row.worktreePath, status: "created" });
+        } catch (error) {
+          outcomes.push({
+            index: row.index,
+            branchName: row.branchName,
+            worktreePath: row.worktreePath,
+            status: "failed",
+            error: toApiError(error).message,
+          });
+        }
+      }
+
+      const postInspection = await inspectRepository(inspection.repositoryPath);
+      const createdRecords = await Promise.all(
+        outcomes
+          .filter((outcome) => outcome.status === "created")
+          .map(async (outcome) => {
+            const resolvedPath = path.resolve(outcome.worktreePath);
+            const realWorktreePath = await fs.realpath(resolvedPath).catch(() => resolvedPath);
+            const entry =
+              postInspection.worktrees.find((worktree) => worktree.realPath === realWorktreePath) ??
+              postInspection.worktrees.find((worktree) => path.resolve(worktree.path) === resolvedPath);
+
+            return {
+              worktreeId: createRecordId("worktree"),
+              branchName: outcome.branchName,
+              worktreePath: outcome.worktreePath,
+              realWorktreePath,
+              head: entry?.head,
+              locked: entry?.locked,
+              prunable: entry?.prunable,
+            };
+          }),
+      );
+
+      const createdCount = createdRecords.length;
+      const failedCount = outcomes.length - createdCount;
+      const warnings = dirty
+        ? ["Primary Worktree had uncommitted changes; they were not copied into the new Linked Worktrees"]
+        : [];
+
+      const state = await localStore.update((mutableStore) => {
+        const timestamp = nowIso();
+        const mutableRepository = findVisibleRepository(mutableStore, repositoryId);
+
+        for (const record of createdRecords) {
+          mutableStore.worktrees.push(
+            createWorktreeRecord({
+              worktreeId: record.worktreeId,
+              repositoryId,
+              type: "linked",
+              worktreePath: record.worktreePath,
+              realWorktreePath: record.realWorktreePath,
+              gitCommonDir: mutableRepository.gitCommonDir,
+              branch: record.branchName,
+              head: record.head,
+              locked: record.locked,
+              prunable: record.prunable,
+              createdByRepoBinder: true,
+              // Worktree Setup Script execution is implemented in a later phase.
+              setupStatus: "skipped",
+              timestamp,
+            }),
+          );
+        }
+
+        const firstCreated = createdRecords[0];
+
+        if (firstCreated) {
+          mutableStore.selection = {
+            repositoryId,
+            worktreeId: firstCreated.worktreeId,
+            updatedAt: timestamp,
+          };
+        }
+
+        mutableRepository.updatedAt = timestamp;
+
+        const status = failedCount === 0 ? "success" : createdCount === 0 ? "failed" : "warning";
+        const severity = failedCount === 0 ? "success" : createdCount === 0 ? "error" : "warning";
+        const summary =
+          failedCount === 0
+            ? `Created ${createdCount} Linked Worktree${createdCount === 1 ? "" : "s"}`
+            : createdCount === 0
+              ? "No Linked Worktrees were created"
+              : `Created ${createdCount} of ${outcomes.length} Linked Worktrees`;
+
+        appendOperationRecord(mutableStore, {
+          type: "worktree.create-batch",
+          status,
+          severity,
+          summary,
+          repositoryId,
+          worktreeId: createdRecords[0]?.worktreeId,
+          details: compactJsonObject({
+            baseBranch,
+            requested: outcomes.length,
+            created: createdCount,
+            failed: failedCount,
+            dirty,
+            warnings: warnings as JsonValue,
+            rows: outcomes.map((outcome) =>
+              compactJsonObject({
+                branchName: outcome.branchName,
+                worktreePath: outcome.worktreePath,
+                status: outcome.status,
+                error: outcome.error,
+              }),
+            ) as JsonValue,
+          }),
+        });
+
+        return buildAppStateResource(mutableStore);
+      });
+
+      return { state, outcomes, createdCount, failedCount, warnings };
+    });
+
+    broadcast({ type: "state.changed", reason: "worktree.create-batch" });
+    response.status(201).json({
+      state: result.state,
+      result: {
+        baseBranch,
+        dirty,
+        created: result.createdCount,
+        failed: result.failedCount,
+        warnings: result.warnings,
+        rows: result.outcomes,
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof ApiError && error.statusCode === 409)) {
+      await recordOperationSafely({
+        type: "worktree.create-batch",
+        status: "failed",
+        severity: "error",
+        summary: "New Worktree batch failed",
+        repositoryId,
+        details: compactJsonObject({
           error: toApiError(error).message,
         }),
       });
@@ -1039,6 +1262,150 @@ function createWorktreeRecord(input: {
     createdAt: input.timestamp,
     updatedAt: input.timestamp,
   };
+}
+
+function readNewWorktreeRows(body: unknown): (string | undefined)[] {
+  if (!isRecord(body) || !Array.isArray(body.rows)) {
+    throw new ApiError(400, "New Worktree requires a rows array");
+  }
+
+  if (body.rows.length < 1 || body.rows.length > 5) {
+    throw new ApiError(400, "New Worktree accepts 1 to 5 rows");
+  }
+
+  const names = body.rows.map((row) => {
+    if (!isRecord(row) || typeof row.branchName !== "string") {
+      return undefined;
+    }
+
+    const trimmed = row.branchName.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  });
+
+  if (!names[0]) {
+    throw new ApiError(400, "The first Branch name is required");
+  }
+
+  return names;
+}
+
+function resolveBatchRows(names: (string | undefined)[], primaryWorktreePath: string): BatchRow[] {
+  const firstBranch = names[0] as string;
+  const resolvedPrimaryPath = path.resolve(primaryWorktreePath);
+  const parentDir = path.dirname(resolvedPrimaryPath);
+  const baseFolderName = path.basename(resolvedPrimaryPath);
+
+  return names.map((name, index) => {
+    const branchName = name ?? `${firstBranch}-${index + 1}`;
+    const slug = slugifyBranchName(branchName);
+
+    return {
+      index,
+      branchName,
+      worktreePath: path.join(parentDir, `${baseFolderName}-${slug}`),
+    };
+  });
+}
+
+async function validateBatchRows(
+  rows: BatchRow[],
+  inspection: RepositoryInspection,
+  store: RepoBinderStore,
+): Promise<BatchRowValidation[]> {
+  const existingBranches = new Set(inspection.branches);
+  const existingWorktreePaths = new Set<string>();
+
+  for (const record of store.worktrees) {
+    if (record.deletedAt) {
+      continue;
+    }
+
+    existingWorktreePaths.add(path.resolve(record.worktreePath));
+
+    if (record.realWorktreePath) {
+      existingWorktreePaths.add(path.resolve(record.realWorktreePath));
+    }
+  }
+
+  const seenBranches = new Set<string>();
+  const seenPaths = new Set<string>();
+  const validations: BatchRowValidation[] = [];
+
+  for (const row of rows) {
+    const errors: string[] = [];
+
+    if (!(await isValidGitBranchName(row.branchName))) {
+      errors.push(`Invalid Branch name: ${row.branchName}`);
+    }
+
+    if (seenBranches.has(row.branchName)) {
+      errors.push(`Duplicate Branch name in this batch: ${row.branchName}`);
+    } else {
+      seenBranches.add(row.branchName);
+    }
+
+    if (existingBranches.has(row.branchName)) {
+      errors.push(`Branch already exists: ${row.branchName}`);
+    }
+
+    const resolvedPath = path.resolve(row.worktreePath);
+
+    if (seenPaths.has(resolvedPath)) {
+      errors.push(`Two rows generate the same Worktree Path: ${row.worktreePath}`);
+    } else {
+      seenPaths.add(resolvedPath);
+    }
+
+    if (existingWorktreePaths.has(resolvedPath)) {
+      errors.push(`A tracked Worktree already uses this path: ${row.worktreePath}`);
+    }
+
+    if (await pathExists(resolvedPath)) {
+      errors.push(`Worktree Path already exists on disk: ${row.worktreePath}`);
+    }
+
+    validations.push({ ...row, errors });
+  }
+
+  return validations;
+}
+
+function slugifyBranchName(branch: string): string {
+  const slug = branch
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-.]+/, "")
+    .replace(/[-.]+$/, "");
+
+  return slug || "worktree";
+}
+
+async function isValidGitBranchName(branchName: string): Promise<boolean> {
+  if (/[\0\r\n]/.test(branchName)) {
+    return false;
+  }
+
+  try {
+    await execFileAsync("git", ["check-ref-format", `refs/heads/${branchName}`], { windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
+  const { stdout } = await runGit(worktreePath, ["status", "--porcelain"]);
+  return stdout.trim().length > 0;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function buildAddWorktreeArgs(
