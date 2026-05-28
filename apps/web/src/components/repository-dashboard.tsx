@@ -1,4 +1,4 @@
-import { GitBranch } from "lucide-react";
+import { ExternalLink, GitBranch } from "lucide-react";
 
 import { Metric, StatusBadge } from "@/components/status-display";
 import { devServerTone, formatDevServer, formatSetupStatus, setupTone } from "@/lib/format";
@@ -8,6 +8,7 @@ export function RepositoryDashboard(props: {
   repository: RepositoryResource;
   selectedWorktree?: WorktreeResource;
   selectedWorktreeId?: string;
+  onOpenDev: (worktreeId: string) => void;
 }): JSX.Element {
   const linkedCount = props.repository.worktrees.filter((worktree) => worktree.type === "linked").length;
 
@@ -35,6 +36,7 @@ export function RepositoryDashboard(props: {
             <span role="columnheader">Worktree Path</span>
             <span role="columnheader">Setup</span>
             <span role="columnheader">Dev Server</span>
+            <span role="columnheader">Actions</span>
           </div>
 
           {props.repository.worktrees.map((worktree) => (
@@ -42,6 +44,7 @@ export function RepositoryDashboard(props: {
               key={worktree.worktreeId}
               worktree={worktree}
               selected={worktree.worktreeId === props.selectedWorktreeId}
+              onOpenDev={props.onOpenDev}
             />
           ))}
         </div>
@@ -50,29 +53,82 @@ export function RepositoryDashboard(props: {
   );
 }
 
-function WorktreeRow(props: { worktree: WorktreeResource; selected: boolean }): JSX.Element {
+function WorktreeRow(props: {
+  worktree: WorktreeResource;
+  selected: boolean;
+  onOpenDev: (worktreeId: string) => void;
+}): JSX.Element {
+  const { worktree } = props;
+  const runningProcesses = worktree.trackedProcesses.filter((process) => process.status === "running");
+  const canOpenDev = isOpenDevActionable(worktree);
+
   return (
     <article className={`worktreeRow ${props.selected ? "selected" : ""}`} role="row">
       <div className="branchCell" role="cell">
         <GitBranch size={16} />
         <div>
-          <strong>{props.worktree.branch ?? "Detached HEAD"}</strong>
-          <small>{props.worktree.head ? props.worktree.head.slice(0, 7) : "No HEAD"}</small>
+          <strong>{worktree.branch ?? "Detached HEAD"}</strong>
+          <small>{worktree.head ? worktree.head.slice(0, 7) : "No HEAD"}</small>
         </div>
       </div>
       <div role="cell">
         <StatusBadge
-          tone={props.worktree.type === "primary" ? "neutral" : "info"}
-          text={props.worktree.type === "primary" ? "Primary" : "Linked"}
+          tone={worktree.type === "primary" ? "neutral" : "info"}
+          text={worktree.type === "primary" ? "Primary" : "Linked"}
         />
       </div>
-      <code role="cell">{props.worktree.worktreePath}</code>
+      <code role="cell">{worktree.worktreePath}</code>
       <div role="cell">
-        <StatusBadge tone={setupTone(props.worktree.setup.status)} text={formatSetupStatus(props.worktree.setup.status)} />
+        <StatusBadge tone={setupTone(worktree.setup.status)} text={formatSetupStatus(worktree.setup.status)} />
       </div>
-      <div role="cell">
-        <StatusBadge tone={devServerTone(props.worktree.devServer?.status)} text={formatDevServer(props.worktree.devServer)} />
+      <div className="devServerCell" role="cell">
+        <StatusBadge tone={devServerTone(worktree.devServer?.status)} text={formatDevServer(worktree.devServer)} />
+        {runningProcesses.length > 0 ? (
+          <span className="processMeta">
+            {runningProcesses.length} process{runningProcesses.length === 1 ? "" : "es"}
+            {worktree.devServer?.pid ? ` · pid ${worktree.devServer.pid}` : ""}
+            {worktree.devServer?.port ? ` · :${worktree.devServer.port}` : ""}
+          </span>
+        ) : null}
+      </div>
+      <div className="rowActions" role="cell">
+        {canOpenDev ? (
+          <button
+            className="secondaryButton"
+            type="button"
+            aria-label={`Open Dev Server for ${worktree.branch ?? "Worktree"}`}
+            onClick={() => props.onOpenDev(worktree.worktreeId)}
+          >
+            <ExternalLink size={15} />
+            <span>Open Dev</span>
+          </button>
+        ) : null}
       </div>
     </article>
   );
+}
+
+// Open Dev is actionable only when a localhost URL or a port is known, matching
+// the backend's localhost-only policy.
+function isOpenDevActionable(worktree: WorktreeResource): boolean {
+  const devServer = worktree.devServer;
+
+  if (!devServer) {
+    return false;
+  }
+
+  if (devServer.url) {
+    return isLocalhostUrl(devServer.url);
+  }
+
+  return devServer.port !== undefined;
+}
+
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
 }

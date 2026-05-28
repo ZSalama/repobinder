@@ -1,4 +1,4 @@
-import { AlertTriangle, GitBranch, Plus, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, GitBranch, Plus, RefreshCw, Rocket, X } from "lucide-react";
 import { FormEvent } from "react";
 
 import { BannerMessage } from "@/components/banner-message";
@@ -9,14 +9,19 @@ export function NewWorktreeSheet(props: {
   loading: boolean;
   context?: NewWorktreeContext;
   rows: string[];
+  rowArgs: string[];
+  sharedArgs: string;
   rowErrors: Record<number, string[]>;
   isBusy: boolean;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateRow: (index: number, value: string) => void;
+  onUpdateRowArgs: (index: number, value: string) => void;
+  onUpdateSharedArgs: (value: string) => void;
   onAddRow: () => void;
   onRemoveRow: (index: number) => void;
 }): JSX.Element {
+  const setupEnabled = props.context?.setupEnabled ?? false;
   return (
     <div className="sheetLayer" role="presentation" onMouseDown={props.onClose}>
       <section
@@ -66,6 +71,14 @@ export function NewWorktreeSheet(props: {
               />
             ) : null}
 
+            {props.context?.autoStartDevServer ? (
+              <BannerMessage
+                tone="info"
+                text="Auto Start Dev Server is on. RepoBinder will reserve a port per Worktree and pass --port to the setup script."
+                icon={<Rocket size={17} />}
+              />
+            ) : null}
+
             <div className="branchRowList">
               {props.rows.map((row, index) => (
                 <div className="branchRow" key={index}>
@@ -95,6 +108,18 @@ export function NewWorktreeSheet(props: {
                       {error}
                     </p>
                   ))}
+                  {setupEnabled ? (
+                    <details className="rowArgs">
+                      <summary>Row-specific setup args</summary>
+                      <textarea
+                        value={props.rowArgs[index] ?? ""}
+                        onChange={(event) => props.onUpdateRowArgs(index, event.target.value)}
+                        placeholder="One arg per line"
+                        aria-label={`Setup args for Branch row ${index + 1}`}
+                        rows={2}
+                      />
+                    </details>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -104,6 +129,18 @@ export function NewWorktreeSheet(props: {
                 <Plus size={16} />
                 <span>Add Worktree row</span>
               </button>
+            ) : null}
+
+            {setupEnabled ? (
+              <label className="fieldStack">
+                <span>Shared run args</span>
+                <textarea
+                  value={props.sharedArgs}
+                  onChange={(event) => props.onUpdateSharedArgs(event.target.value)}
+                  placeholder="One arg per line, applied to every Worktree in this batch"
+                  rows={3}
+                />
+              </label>
             ) : null}
 
             <div className="sheetActions">

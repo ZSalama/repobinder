@@ -8,7 +8,28 @@ export type SetupStatus =
   | "failed"
   | "skipped";
 export type DevServerStatus = "unknown" | "running" | "stopped" | "unreachable";
+export type TrackedProcessRole = "setup" | "dev_server" | "other";
+export type TrackedProcessStatus = "unknown" | "running" | "stopped" | "failed";
 export type SocketState = "connecting" | "open" | "closed";
+
+export type TrackedProcess = {
+  processRecordId: string;
+  repositoryId: string;
+  worktreeId: string;
+  role: TrackedProcessRole;
+  status: TrackedProcessStatus;
+  pid: number;
+  command?: string;
+  args: string[];
+  cwd: string;
+  url?: string;
+  port?: number;
+  startedAt?: string;
+  lastSeenAt?: string;
+  stoppedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type RepositorySettings = {
   repositoryId: string;
@@ -48,7 +69,7 @@ export type WorktreeResource = {
     pid?: number;
     updatedAt?: string;
   };
-  trackedProcesses: unknown[];
+  trackedProcesses: TrackedProcess[];
   createdAt: string;
   updatedAt: string;
 };
@@ -84,6 +105,21 @@ export type NewWorktreeContext = {
   baseBranch?: string;
   detached: boolean;
   dirty: boolean;
+  setupEnabled: boolean;
+  autoStartDevServer: boolean;
+};
+
+export type SetupRowResult = {
+  status: SetupStatus;
+  exitCode: number | null;
+  durationMs: number;
+  timedOut: boolean;
+  truncated: boolean;
+  metadataParsed: boolean;
+  warnings: string[];
+  stdout: string;
+  stderr: string;
+  devServer?: { url?: string; port?: number; pid?: number };
 };
 
 export type BatchRowResult = {
@@ -92,6 +128,14 @@ export type BatchRowResult = {
   worktreePath: string;
   status: "created" | "failed";
   error?: string;
+  reservedPort?: number;
+  devServerStatus?: DevServerStatus;
+  setup?: SetupRowResult;
+};
+
+export type OpenDevResponse = {
+  url: string;
+  reachable: boolean;
 };
 
 export type BatchResult = {
@@ -145,6 +189,7 @@ declare global {
     repobinderDesktop?: {
       getDesktopContext: () => Promise<DesktopContext>;
       pickRepositoryFolder: () => Promise<string | undefined>;
+      openExternal: (url: string) => Promise<boolean>;
     };
   }
 }

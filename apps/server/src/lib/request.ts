@@ -95,7 +95,13 @@ export function readStringArray(value: unknown, field: string): string[] {
   });
 }
 
-export function readNewWorktreeRows(body: unknown): (string | undefined)[] {
+export type NewWorktreeRequest = {
+  names: (string | undefined)[];
+  rowArgs: string[][];
+  sharedArgs: string[];
+};
+
+export function readNewWorktreeRequest(body: unknown): NewWorktreeRequest {
   if (!isRecord(body) || !Array.isArray(body.rows)) {
     throw new ApiError(400, "New Worktree requires a rows array");
   }
@@ -104,20 +110,26 @@ export function readNewWorktreeRows(body: unknown): (string | undefined)[] {
     throw new ApiError(400, "New Worktree accepts 1 to 5 rows");
   }
 
-  const names = body.rows.map((row) => {
-    if (!isRecord(row) || typeof row.branchName !== "string") {
-      return undefined;
-    }
+  const names: (string | undefined)[] = [];
+  const rowArgs: string[][] = [];
 
-    const trimmed = row.branchName.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
+  body.rows.forEach((row, index) => {
+    const branchName = isRecord(row) && typeof row.branchName === "string" ? row.branchName.trim() : "";
+    names.push(branchName.length > 0 ? branchName : undefined);
+    rowArgs.push(isRecord(row) && row.args !== undefined ? readStringArray(row.args, `rows[${index}].args`) : []);
   });
 
   if (!names[0]) {
     throw new ApiError(400, "The first Branch name is required");
   }
 
-  return names;
+  const sharedArgs = isRecord(body) && body.sharedArgs !== undefined ? readStringArray(body.sharedArgs, "sharedArgs") : [];
+
+  return { names, rowArgs, sharedArgs };
+}
+
+export function argsContainPort(args: string[]): boolean {
+  return args.some((arg) => arg === "--port" || arg.startsWith("--port="));
 }
 
 export async function readRepositorySettingsBody(
@@ -143,7 +155,7 @@ export async function readRepositorySettingsBody(
     await validateSetupCommand(command, primaryWorktreePath);
   }
 
-  if (autoStartDevServer && containsPortArg(defaultArgs)) {
+  if (autoStartDevServer && argsContainPort(defaultArgs)) {
     throw new ApiError(400, "Default setup args cannot include --port when Auto Start Dev Server is enabled");
   }
 
@@ -191,6 +203,3 @@ function isPathLikeCommand(command: string): boolean {
   return path.isAbsolute(command) || command.startsWith(".") || command.includes("/") || command.includes("\\");
 }
 
-function containsPortArg(args: string[]): boolean {
-  return args.some((arg) => arg === "--port" || arg.startsWith("--port="));
-}

@@ -50,6 +50,9 @@ export function createWorktreeRecord(input: {
   prunable?: string;
   createdByRepoBinder: boolean;
   setupStatus: WorktreeRecord["setup"]["status"];
+  setupWarnings?: string[];
+  setupLastExitCode?: number;
+  devServer?: WorktreeRecord["devServer"];
   timestamp: string;
 }): WorktreeRecord {
   return {
@@ -68,8 +71,10 @@ export function createWorktreeRecord(input: {
     setup: {
       status: input.setupStatus,
       updatedAt: input.timestamp,
-      warnings: [],
+      warnings: input.setupWarnings ?? [],
+      lastExitCode: input.setupLastExitCode,
     },
+    devServer: input.devServer,
     createdAt: input.timestamp,
     updatedAt: input.timestamp,
   };

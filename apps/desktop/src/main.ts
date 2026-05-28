@@ -45,6 +45,23 @@ ipcMain.handle("repobinder:get-desktop-context", () => ({
   desktopAuthToken: desktopToken,
 }));
 
+// Open Dev opens the Worktree's Dev Server URL in the user's default browser.
+// Only loopback URLs are accepted so repository scripts cannot turn RepoBinder
+// into an arbitrary URL launcher.
+ipcMain.handle("repobinder:open-external", async (_event, url: unknown) => {
+  if (typeof url !== "string" || !isLoopbackUrl(url)) {
+    return false;
+  }
+
+  try {
+    await shell.openExternal(url);
+    return true;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+});
+
 app.whenReady().then(startDesktopApp).catch((error) => {
   console.error(error);
   app.quit();
@@ -325,6 +342,21 @@ function logExposure(config: BackendConfig): void {
 
   for (const url of getRemoteUrls(config.port)) {
     console.log(`Remote candidate: ${url}`);
+  }
+}
+
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return false;
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
   }
 }
 

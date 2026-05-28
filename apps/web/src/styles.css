@@ -583,7 +583,7 @@ button:focus-visible {
 .worktreeTableHeader,
 .worktreeRow {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 112px minmax(260px, 1.4fr) 136px 146px;
+  grid-template-columns: minmax(180px, 1fr) 112px minmax(220px, 1.3fr) 136px 146px 116px;
   gap: 12px;
   align-items: center;
 }
@@ -637,6 +637,39 @@ button:focus-visible {
 .worktreeRow code {
   color: var(--text-muted);
   font-size: 0.82rem;
+}
+
+.rowActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.devServerCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.processMeta {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.rowArgs {
+  margin-top: 8px;
+}
+
+.rowArgs summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.rowArgs textarea {
+  margin-top: 6px;
 }
 
 .statusDot {

@@ -9,7 +9,7 @@ import {
   Settings,
   Wifi,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { BannerMessage } from "@/components/banner-message";
 import { ConnectionPill } from "@/components/connection-pill";
@@ -27,6 +27,7 @@ import {
   BatchValidationRow,
   DesktopContext,
   NewWorktreeContext,
+  OpenDevResponse,
   ServerInfo,
   SettingsDraft,
   SocketState,
@@ -47,6 +48,8 @@ export function App(): JSX.Element {
   const [newWorktreeContext, setNewWorktreeContext] = useState<NewWorktreeContext | undefined>();
   const [newWorktreeLoading, setNewWorktreeLoading] = useState(false);
   const [newWorktreeRows, setNewWorktreeRows] = useState<string[]>([""]);
+  const [newWorktreeRowArgs, setNewWorktreeRowArgs] = useState<string[]>([""]);
+  const [newWorktreeSharedArgs, setNewWorktreeSharedArgs] = useState<string>("");
   const [newWorktreeRowErrors, setNewWorktreeRowErrors] = useState<Record<number, string[]>>({});
 
   const selectedRepository = useMemo(() => {
@@ -64,6 +67,8 @@ export function App(): JSX.Element {
   const selectedWorktree = selectedRepository?.worktrees.find((worktree) => worktree.worktreeId === selectedWorktreeId);
   const isDesktop = Boolean(window.repobinderDesktop && desktopContext?.desktopAuthToken);
   const isBusy = Boolean(busyAction);
+  const pollRef = useRef<{ busy: boolean; repositoryId?: string }>({ busy: false });
+  pollRef.current = { busy: isBusy, repositoryId: selectedRepository?.repositoryId };
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -110,6 +115,20 @@ export function App(): JSX.Element {
     setSettingsDraft(createSettingsDraft(selectedRepository.settings));
   }, [selectedRepository, settingsOpen]);
 
+  // Light status polling for the Selected Repository so the dashboard notices
+  // stale Dev Servers without aggressive polling for every Repository.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const { busy, repositoryId } = pollRef.current;
+
+      if (!busy && repositoryId) {
+        void refreshWorktreeStatus(repositoryId);
+      }
+    }, 10_000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   async function boot(): Promise<void> {
     setLoadFailure(undefined);
 
@@ -145,6 +164,42 @@ export function App(): JSX.Element {
       if (!options.silent) {
         setBusyAction(undefined);
       }
+    }
+  }
+
+  async function refreshWorktreeStatus(repositoryId: string): Promise<void> {
+    try {
+      const nextState = await api<AppStateResource>(`/api/repositories/${repositoryId}/worktree-status`, {
+        method: "POST",
+      });
+      setAppState(nextState);
+    } catch {
+      // Status polling is best-effort and stays silent on failure.
+    }
+  }
+
+  async function openDevServer(worktreeId: string): Promise<void> {
+    if (!selectedRepository) {
+      return;
+    }
+
+    try {
+      const result = await api<OpenDevResponse>(
+        `/api/repositories/${selectedRepository.repositoryId}/worktrees/${worktreeId}/open-dev`,
+        { method: "POST" },
+      );
+
+      const opened = window.repobinderDesktop?.openExternal
+        ? await window.repobinderDesktop.openExternal(result.url)
+        : Boolean(window.open(result.url, "_blank", "noopener,noreferrer"));
+
+      if (!result.reachable) {
+        setBanner({ tone: "warning", text: "Dev Server is not reachable from the RepoBinder host" });
+      } else if (!opened) {
+        setBanner({ tone: "warning", text: "Could not open the Dev Server URL" });
+      }
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
     }
   }
 
@@ -280,6 +335,8 @@ export function App(): JSX.Element {
     }
 
     setNewWorktreeRows([""]);
+    setNewWorktreeRowArgs([""]);
+    setNewWorktreeSharedArgs("");
     setNewWorktreeRowErrors({});
     setNewWorktreeContext(undefined);
     setNewWorktreeOpen(true);
@@ -302,12 +359,18 @@ export function App(): JSX.Element {
     setNewWorktreeRows((rows) => rows.map((row, rowIndex) => (rowIndex === index ? value : row)));
   }
 
+  function updateNewWorktreeRowArgs(index: number, value: string): void {
+    setNewWorktreeRowArgs((rows) => rows.map((row, rowIndex) => (rowIndex === index ? value : row)));
+  }
+
   function addNewWorktreeRow(): void {
     setNewWorktreeRows((rows) => (rows.length >= 5 ? rows : [...rows, ""]));
+    setNewWorktreeRowArgs((rows) => (rows.length >= 5 ? rows : [...rows, ""]));
   }
 
   function removeNewWorktreeRow(index: number): void {
     setNewWorktreeRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
+    setNewWorktreeRowArgs((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
     setNewWorktreeRowErrors({});
   }
 
@@ -326,7 +389,13 @@ export function App(): JSX.Element {
       const response = await fetch(`/api/repositories/${selectedRepository.repositoryId}/worktrees`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: newWorktreeRows.map((branchName) => ({ branchName })) }),
+        body: JSON.stringify({
+          rows: newWorktreeRows.map((branchName, index) => ({
+            branchName,
+            args: parseArgsText(newWorktreeRowArgs[index] ?? ""),
+          })),
+          sharedArgs: parseArgsText(newWorktreeSharedArgs),
+        }),
       });
       const body = (await response.json().catch(() => undefined)) as
         | (BatchResponse & { error?: string; rows?: BatchValidationRow[] })
@@ -490,6 +559,7 @@ export function App(): JSX.Element {
             repository={selectedRepository}
             selectedWorktree={selectedWorktree}
             selectedWorktreeId={selectedWorktreeId}
+            onOpenDev={(worktreeId) => void openDevServer(worktreeId)}
           />
         ) : (
           <section className="emptyDashboard" aria-labelledby="choose-repository-title">
@@ -541,11 +611,15 @@ export function App(): JSX.Element {
           loading={newWorktreeLoading}
           context={newWorktreeContext}
           rows={newWorktreeRows}
+          rowArgs={newWorktreeRowArgs}
+          sharedArgs={newWorktreeSharedArgs}
           rowErrors={newWorktreeRowErrors}
           isBusy={isBusy}
           onClose={() => setNewWorktreeOpen(false)}
           onSubmit={(event) => void submitNewWorktree(event)}
           onUpdateRow={updateNewWorktreeRow}
+          onUpdateRowArgs={updateNewWorktreeRowArgs}
+          onUpdateSharedArgs={setNewWorktreeSharedArgs}
           onAddRow={addNewWorktreeRow}
           onRemoveRow={removeNewWorktreeRow}
         />
