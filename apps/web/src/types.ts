@@ -10,7 +10,11 @@ export type SetupStatus =
 export type DevServerStatus = "unknown" | "running" | "stopped" | "unreachable";
 export type TrackedProcessRole = "setup" | "dev_server" | "other";
 export type TrackedProcessStatus = "unknown" | "running" | "stopped" | "failed";
+export type OperationSeverity = "info" | "success" | "warning" | "error";
+export type OperationStatus = "pending" | "success" | "warning" | "failed";
 export type SocketState = "connecting" | "open" | "closed";
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export type JsonObject = { [key: string]: JsonValue };
 
 export type TrackedProcess = {
   processRecordId: string;
@@ -88,6 +92,20 @@ export type RepositoryResource = {
   updatedAt: string;
 };
 
+export type OperationRecord = {
+  operationId: string;
+  type: string;
+  status: OperationStatus;
+  severity: OperationSeverity;
+  summary: string;
+  repositoryId?: string;
+  worktreeId?: string;
+  details?: JsonObject;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
 export type AppStateResource = {
   schemaVersion: number;
   selection: {
@@ -96,7 +114,7 @@ export type AppStateResource = {
     updatedAt?: string;
   };
   repositories: RepositoryResource[];
-  operations: unknown[];
+  operations: OperationRecord[];
 };
 
 export type NewWorktreeContext = {

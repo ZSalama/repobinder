@@ -643,6 +643,10 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.branchCell .worktreeWarning {
+  color: var(--amber);
+}
+
 .worktreeRow code {
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -754,7 +758,8 @@ button:focus-visible {
 }
 
 .mobileSidebarSheet,
-.settingsSheet {
+.settingsSheet,
+.activitySheet {
   position: relative;
   width: min(420px, 100%);
   height: 100%;
@@ -879,7 +884,8 @@ button:focus-visible {
   right: 12px;
 }
 
-.settingsSheet {
+.settingsSheet,
+.activitySheet {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -898,6 +904,172 @@ button:focus-visible {
   align-content: start;
   gap: 16px;
   padding: 18px;
+}
+
+.activitySheet {
+  width: min(620px, 100%);
+}
+
+.activityList {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.activityItem {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.activityItem.success {
+  border-color: rgb(122 215 181 / 20%);
+}
+
+.activityItem.warning {
+  border-color: rgb(241 191 98 / 24%);
+}
+
+.activityItem.danger {
+  border-color: rgb(255 141 126 / 24%);
+}
+
+.activityIcon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: rgb(255 255 255 / 5%);
+}
+
+.activityItem.success .activityIcon {
+  color: var(--green);
+}
+
+.activityItem.warning .activityIcon {
+  color: var(--amber);
+}
+
+.activityItem.danger .activityIcon {
+  color: var(--red);
+}
+
+.activityBody {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.activityHeader,
+.activityMeta {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.activityHeader {
+  justify-content: space-between;
+}
+
+.activitySummary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.activitySummary strong {
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.activitySummary span,
+.activityMeta,
+.detailsGrid dt,
+.detailsEmpty {
+  color: var(--text-muted);
+}
+
+.activitySummary span,
+.activityMeta,
+.detailsGrid,
+.detailsEmpty {
+  font-size: 0.78rem;
+}
+
+.activityMeta {
+  flex-wrap: wrap;
+}
+
+.activityMeta code {
+  color: var(--green);
+}
+
+.activityDetails {
+  min-width: 0;
+}
+
+.activityDetails summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 720;
+}
+
+.detailsGrid {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.detailsGrid div {
+  display: grid;
+  gap: 3px;
+}
+
+.detailsGrid dt,
+.detailsGrid dd {
+  margin: 0;
+}
+
+.detailsGrid dd {
+  overflow-wrap: anywhere;
+}
+
+.detailsJson {
+  max-height: 320px;
+  margin: 10px 0 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: rgb(0 0 0 / 18%);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.detailsEmpty {
+  margin: 10px 0 0;
+}
+
+.emptyActivity {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 220px;
+  color: var(--text-muted);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
 }
 
 .fieldStack {

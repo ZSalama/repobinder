@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import { Router } from "express";
 
 import { buildAppStateResource } from "../resources";
@@ -5,11 +8,80 @@ import { findVisibleRepository, localStore, recordOperationSafely } from "../con
 import { ApiError, toApiError } from "../lib/errors";
 import { compactJsonObject, nowIso } from "../lib/json";
 import { readRouteParam } from "../lib/request";
+import { inspectRepository } from "../git/inspection";
+import { Worktree } from "../lib/types";
 import { probeDevServerStatus, probeProcessStatus } from "../setup/devserver";
 import { isLocalhostUrl, isPortReachable, parseUrlHost, parseUrlPort } from "../setup/status";
-import { DevServerStatus, TrackedProcessStatus } from "../store";
+import { DevServerStatus, TrackedProcessStatus, WorktreeRecord } from "../store";
 
 export const worktreeStatusRouter = Router();
+
+// Manual/startup/focus refresh for tracked Worktree Git state. This only
+// updates records RepoBinder already knows about; it does not discover or add
+// unmanaged Git worktrees.
+worktreeStatusRouter.post("/api/repositories/:repositoryId/refresh", async (request, response, next) => {
+  const repositoryId = readRouteParam(request, "repositoryId");
+
+  try {
+    const store = await localStore.read();
+    const repository = findVisibleRepository(store, repositoryId);
+    const inspection = await inspectRepository(repository.primaryWorktreePath);
+    const existingPathByWorktreeId = new Map<string, boolean>();
+
+    await Promise.all(
+      store.worktrees
+        .filter((worktree) => worktree.repositoryId === repositoryId && !worktree.deletedAt)
+        .map(async (worktree) => {
+          existingPathByWorktreeId.set(worktree.worktreeId, await pathExists(worktree.worktreePath));
+        }),
+    );
+
+    const state = await localStore.update((mutableStore) => {
+      const timestamp = nowIso();
+      const mutableRepository = findVisibleRepository(mutableStore, repositoryId);
+
+      for (const worktree of mutableStore.worktrees) {
+        if (worktree.repositoryId !== repositoryId || worktree.deletedAt) {
+          continue;
+        }
+
+        const inspectedWorktree = findMatchingInspectedWorktree(worktree, inspection.worktrees);
+
+        if (inspectedWorktree) {
+          worktree.branch = inspectedWorktree.branch;
+          worktree.head = inspectedWorktree.head;
+          worktree.availability = inspectedWorktree.realPath ? "available" : "missing";
+          worktree.locked = inspectedWorktree.locked;
+          worktree.prunable = inspectedWorktree.prunable;
+          worktree.updatedAt = timestamp;
+          continue;
+        }
+
+        worktree.availability = existingPathByWorktreeId.get(worktree.worktreeId) ? "unknown" : "missing";
+        worktree.locked = undefined;
+        worktree.prunable = undefined;
+        worktree.updatedAt = timestamp;
+      }
+
+      mutableRepository.updatedAt = timestamp;
+      return buildAppStateResource(mutableStore);
+    });
+
+    response.json(state);
+  } catch (error) {
+    await recordOperationSafely({
+      type: "repository.refresh",
+      status: "failed",
+      severity: "warning",
+      summary: "Repository refresh failed",
+      repositoryId,
+      details: compactJsonObject({
+        error: toApiError(error).message,
+      }),
+    });
+    next(error);
+  }
+});
 
 // Light status refresh for the Selected Repository. Re-probes tracked process
 // liveness and Dev Server reachability and persists the result. This is not a
@@ -122,17 +194,15 @@ worktreeStatusRouter.post(
 
       response.json({ url, reachable });
     } catch (error) {
-      if (!(error instanceof ApiError && (error.statusCode === 400 || error.statusCode === 404))) {
-        await recordOperationSafely({
-          type: "worktree.open-dev",
-          status: "failed",
-          severity: "warning",
-          summary: "Open Dev failed",
-          repositoryId,
-          worktreeId,
-          details: compactJsonObject({ error: toApiError(error).message }),
-        });
-      }
+      await recordOperationSafely({
+        type: "worktree.open-dev",
+        status: "failed",
+        severity: "warning",
+        summary: "Open Dev failed",
+        repositoryId,
+        worktreeId,
+        details: compactJsonObject({ error: toApiError(error).message }),
+      });
 
       next(error);
     }
@@ -153,4 +223,27 @@ function resolveDevServerUrl(devServer: { url?: string; port?: number } | undefi
   }
 
   return undefined;
+}
+
+function findMatchingInspectedWorktree(record: WorktreeRecord, inspectedWorktrees: Worktree[]): Worktree | undefined {
+  const recordedPath = path.resolve(record.worktreePath);
+  const recordedRealPath = path.resolve(record.realWorktreePath);
+
+  return inspectedWorktrees.find((worktree) => {
+    if (worktree.realPath && path.resolve(worktree.realPath) === recordedRealPath) {
+      return true;
+    }
+
+    const inspectedPath = path.resolve(worktree.path);
+    return inspectedPath === recordedPath || inspectedPath === recordedRealPath;
+  });
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
 }

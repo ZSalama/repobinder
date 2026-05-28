@@ -67,6 +67,7 @@ function WorktreeRow(props: {
   const { worktree } = props;
   const runningProcesses = worktree.trackedProcesses.filter((process) => process.status === "running");
   const canOpenDev = isOpenDevActionable(worktree);
+  const worktreeWarnings = getWorktreeWarnings(worktree);
 
   return (
     <article className={`worktreeRow ${props.selected ? "selected" : ""}`} role="row">
@@ -75,6 +76,7 @@ function WorktreeRow(props: {
         <div>
           <strong>{worktree.branch ?? "Detached HEAD"}</strong>
           <small>{worktree.head ? worktree.head.slice(0, 7) : "No HEAD"}</small>
+          {worktreeWarnings.length > 0 ? <small className="worktreeWarning">{worktreeWarnings.join(" · ")}</small> : null}
         </div>
       </div>
       <div role="cell">
@@ -124,6 +126,26 @@ function WorktreeRow(props: {
       </div>
     </article>
   );
+}
+
+function getWorktreeWarnings(worktree: WorktreeResource): string[] {
+  const warnings: string[] = [];
+
+  if (worktree.availability === "missing") {
+    warnings.push("Path missing");
+  } else if (worktree.availability === "unknown") {
+    warnings.push("Availability unknown");
+  }
+
+  if (worktree.locked) {
+    warnings.push(`Locked: ${worktree.locked}`);
+  }
+
+  if (worktree.prunable) {
+    warnings.push(`Prunable: ${worktree.prunable}`);
+  }
+
+  return warnings;
 }
 
 // Open Dev is actionable only when a localhost URL or a port is known, matching

@@ -421,6 +421,23 @@ linkedWorktreesRouter.post("/api/repositories/:repositoryId/worktrees", async (r
     const validation = await validateBatchRows(resolvedRows, inspection, store);
 
     if (validation.some((row) => row.errors.length > 0)) {
+      await recordOperationSafely({
+        type: "worktree.create-batch",
+        status: "failed",
+        severity: "error",
+        summary: "New Worktree validation failed",
+        repositoryId,
+        details: compactJsonObject({
+          baseBranch,
+          rows: validation.map((row) =>
+            compactJsonObject({
+              branchName: row.branchName,
+              worktreePath: row.worktreePath,
+              errors: row.errors as JsonValue,
+            }),
+          ) as JsonValue,
+        }),
+      });
       response.status(400).json({ error: "New Worktree validation failed", rows: validation });
       return;
     }

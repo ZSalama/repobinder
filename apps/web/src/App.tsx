@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   FolderOpen,
   GitBranch,
+  History,
   Menu,
   Plus,
   RefreshCw,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { ActivitySheet } from "@/components/activity-sheet";
 import { BannerMessage } from "@/components/banner-message";
 import { ConnectionPill } from "@/components/connection-pill";
 import { DeleteWorktreeDialog } from "@/components/delete-worktree-dialog";
@@ -30,6 +32,7 @@ import {
   DesktopContext,
   NewWorktreeContext,
   OpenDevResponse,
+  OperationRecord,
   ServerInfo,
   SettingsDraft,
   SocketState,
@@ -45,6 +48,7 @@ export function App(): JSX.Element {
   const [busyAction, setBusyAction] = useState<string | undefined>();
   const [banner, setBanner] = useState<Banner | undefined>();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | undefined>();
   const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
@@ -72,6 +76,8 @@ export function App(): JSX.Element {
   const isDesktop = Boolean(window.repobinderDesktop && desktopContext?.desktopAuthToken);
   const isBusy = Boolean(busyAction);
   const pollRef = useRef<{ busy: boolean; repositoryId?: string }>({ busy: false });
+  const seenOperationIdsRef = useRef<Set<string>>(new Set());
+  const operationsInitializedRef = useRef(false);
   pollRef.current = { busy: isBusy, repositoryId: selectedRepository?.repositoryId };
 
   useEffect(() => {
@@ -84,6 +90,83 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void boot();
+  }, []);
+
+  useEffect(() => {
+    if (!banner) {
+      return;
+    }
+
+    const duration = banner.tone === "success" || banner.tone === "info" ? 5_000 : 12_000;
+    const bannerKey = `${banner.tone}:${banner.text}`;
+    const timeout = window.setTimeout(() => {
+      setBanner((current) => {
+        if (!current || `${current.tone}:${current.text}` !== bannerKey) {
+          return current;
+        }
+
+        return undefined;
+      });
+    }, duration);
+
+    return () => window.clearTimeout(timeout);
+  }, [banner]);
+
+  useEffect(() => {
+    if (!appState) {
+      return;
+    }
+
+    if (!operationsInitializedRef.current) {
+      seenOperationIdsRef.current = new Set(appState.operations.map((operation) => operation.operationId));
+      operationsInitializedRef.current = true;
+      return;
+    }
+
+    const unseenOperations = appState.operations.filter(
+      (operation) => !seenOperationIdsRef.current.has(operation.operationId),
+    );
+
+    for (const operation of unseenOperations) {
+      seenOperationIdsRef.current.add(operation.operationId);
+    }
+
+    const latestCompletedOperation = unseenOperations.find((operation) => operation.status !== "pending");
+
+    if (latestCompletedOperation) {
+      setBanner(operationToBanner(latestCompletedOperation));
+    }
+  }, [appState]);
+
+  useEffect(() => {
+    let lastFocusRefreshAt = 0;
+
+    const refreshAfterFocus = () => {
+      const now = Date.now();
+
+      if (now - lastFocusRefreshAt < 1_500) {
+        return;
+      }
+
+      lastFocusRefreshAt = now;
+
+      if (!pollRef.current.busy) {
+        void refreshSelectedRepository({ silent: true });
+      }
+    };
+    const refreshAfterVisibility = () => {
+      if (!document.hidden) {
+        refreshAfterFocus();
+      }
+    };
+
+    window.addEventListener("focus", refreshAfterFocus);
+    document.addEventListener("visibilitychange", refreshAfterVisibility);
+
+    return () => {
+      window.removeEventListener("focus", refreshAfterFocus);
+      document.removeEventListener("visibilitychange", refreshAfterVisibility);
+    };
   }, []);
 
   useEffect(() => {
@@ -143,9 +226,14 @@ export function App(): JSX.Element {
         api<AppStateResource>("/api/state"),
       ]);
 
+      if (!operationsInitializedRef.current) {
+        seenOperationIdsRef.current = new Set(nextState.operations.map((operation) => operation.operationId));
+        operationsInitializedRef.current = true;
+      }
       setDesktopContext(desktop);
       setServerInfo(nextServerInfo);
       setAppState(nextState);
+      void refreshRepositoryForState(nextState, { silent: true });
     } catch (error) {
       setLoadFailure(toErrorMessage(error));
     }
@@ -160,6 +248,51 @@ export function App(): JSX.Element {
     try {
       const nextState = await api<AppStateResource>("/api/state");
       setAppState(nextState);
+    } catch (error) {
+      if (!options.silent) {
+        setBanner({ tone: "danger", text: toErrorMessage(error) });
+      }
+    } finally {
+      if (!options.silent) {
+        setBusyAction(undefined);
+      }
+    }
+  }
+
+  async function refreshSelectedRepository(options: { silent?: boolean } = {}): Promise<void> {
+    const repositoryId = pollRef.current.repositoryId;
+
+    if (!repositoryId) {
+      await refreshState(options);
+      return;
+    }
+
+    await refreshRepository(repositoryId, options);
+  }
+
+  async function refreshRepositoryForState(
+    state: AppStateResource,
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
+    const repositoryId = state.selection.repositoryId ?? state.repositories[0]?.repositoryId;
+
+    if (repositoryId) {
+      await refreshRepository(repositoryId, options);
+    }
+  }
+
+  async function refreshRepository(repositoryId: string, options: { silent?: boolean } = {}): Promise<void> {
+    if (!options.silent) {
+      setBusyAction("refresh");
+      setBanner(undefined);
+    }
+
+    try {
+      const refreshedState = await api<AppStateResource>(`/api/repositories/${repositoryId}/refresh`, {
+        method: "POST",
+      });
+      setAppState(refreshedState);
+      await refreshWorktreeStatus(repositoryId);
     } catch (error) {
       if (!options.silent) {
         setBanner({ tone: "danger", text: toErrorMessage(error) });
@@ -232,7 +365,7 @@ export function App(): JSX.Element {
       );
 
       setAppState(nextState);
-      setBanner({ tone: "success", text: "Repository added" });
+      void refreshRepositoryForState(nextState, { silent: true });
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
@@ -251,6 +384,7 @@ export function App(): JSX.Element {
 
       setAppState(nextState);
       setMobileSidebarOpen(false);
+      void refreshRepository(repositoryId, { silent: true });
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
@@ -292,7 +426,7 @@ export function App(): JSX.Element {
 
       setAppState(nextState);
       setSettingsOpen(false);
-      setBanner({ tone: "success", text: "Repository Settings saved" });
+      void refreshRepositoryForState(nextState, { silent: true });
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
@@ -325,7 +459,7 @@ export function App(): JSX.Element {
       );
 
       setAppState(nextState);
-      setBanner({ tone: "success", text: "Existing Linked Worktree added" });
+      void refreshRepositoryForState(nextState, { silent: true });
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
@@ -423,25 +557,10 @@ export function App(): JSX.Element {
 
       if (body?.state) {
         setAppState(body.state);
+        void refreshRepositoryForState(body.state, { silent: true });
       }
 
       setNewWorktreeOpen(false);
-
-      const result = body?.result;
-
-      if (!result || result.failed === 0) {
-        setBanner({
-          tone: "success",
-          text: `Created ${result?.created ?? 0} Linked Worktree${result?.created === 1 ? "" : "s"}`,
-        });
-      } else if (result.created === 0) {
-        setBanner({ tone: "danger", text: "No Linked Worktrees were created" });
-      } else {
-        setBanner({
-          tone: "warning",
-          text: `Created ${result.created} of ${result.created + result.failed}; ${result.failed} failed`,
-        });
-      }
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
@@ -468,10 +587,7 @@ export function App(): JSX.Element {
 
       setAppState(response.state);
       setDeleteTarget(undefined);
-      setBanner({
-        tone: response.result.status === "warning" ? "warning" : "success",
-        text: response.result.summary,
-      });
+      void refreshRepositoryForState(response.state, { silent: true });
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
@@ -552,9 +668,13 @@ export function App(): JSX.Element {
               type="button"
               aria-label="Refresh"
               disabled={isBusy}
-              onClick={() => void refreshState()}
+              onClick={() => void refreshSelectedRepository()}
             >
               <RefreshCw size={18} className={busyAction === "refresh" ? "spin" : undefined} />
+            </button>
+            <button className="secondaryButton" type="button" onClick={() => setActivityOpen(true)}>
+              <History size={17} />
+              <span>Activity</span>
             </button>
             <button
               className="primaryButton"
@@ -578,7 +698,11 @@ export function App(): JSX.Element {
         </header>
 
         {serverInfo.remoteEnabled ? (
-          <BannerMessage tone="warning" text="Remote mode is trusted-network-only." icon={<Wifi size={17} />} />
+          <BannerMessage
+            tone="warning"
+            text="Remote mode is enabled. Use RepoBinder only on a trusted network."
+            icon={<Wifi size={17} />}
+          />
         ) : null}
         {banner ? (
           <BannerMessage
@@ -629,6 +753,8 @@ export function App(): JSX.Element {
         />
       ) : null}
 
+      {activityOpen ? <ActivitySheet operations={appState.operations} onClose={() => setActivityOpen(false)} /> : null}
+
       {settingsOpen && selectedRepository && settingsDraft ? (
         <SettingsSheet
           settingsDraft={settingsDraft}
@@ -671,4 +797,11 @@ export function App(): JSX.Element {
       ) : null}
     </main>
   );
+}
+
+function operationToBanner(operation: OperationRecord): Banner {
+  return {
+    tone: operation.severity === "error" ? "danger" : operation.severity,
+    text: operation.summary,
+  };
 }
