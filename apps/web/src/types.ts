@@ -152,6 +152,32 @@ export type BatchResponse = {
   result: BatchResult;
 };
 
+export type DeleteWorktreeResponse = {
+  state: AppStateResource;
+  result: {
+    status: "success" | "warning";
+    summary: string;
+    deleteBranch: boolean;
+    worktreeRemove: { status: "removed" | "already_missing" };
+    prune: { status: "not_needed" | "pruned" | "failed"; error?: string };
+    branchDelete:
+      | { status: "not_requested" }
+      | { status: "skipped"; reason: string }
+      | { status: "deleted"; branch: string }
+      | { status: "failed"; branch: string; error: string };
+    softDelete: { status: "applied" } | { status: "not_applied"; reason: string };
+    processStops: Array<{
+      processRecordId: string;
+      role: string;
+      pid: number;
+      status: "not_running" | "stopped" | "failed";
+      forceUsed: boolean;
+      descendants: number[];
+      error?: string;
+    }>;
+  };
+};
+
 export type BatchValidationRow = {
   index: number;
   branchName: string;

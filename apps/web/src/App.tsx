@@ -13,6 +13,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { BannerMessage } from "@/components/banner-message";
 import { ConnectionPill } from "@/components/connection-pill";
+import { DeleteWorktreeDialog } from "@/components/delete-worktree-dialog";
 import { MobileSidebarSheet } from "@/components/mobile-sidebar-sheet";
 import { NewWorktreeSheet } from "@/components/new-worktree-sheet";
 import { RepositoryDashboard } from "@/components/repository-dashboard";
@@ -25,12 +26,14 @@ import {
   Banner,
   BatchResponse,
   BatchValidationRow,
+  DeleteWorktreeResponse,
   DesktopContext,
   NewWorktreeContext,
   OpenDevResponse,
   ServerInfo,
   SettingsDraft,
   SocketState,
+  WorktreeResource,
 } from "@/types";
 
 export function App(): JSX.Element {
@@ -51,6 +54,7 @@ export function App(): JSX.Element {
   const [newWorktreeRowArgs, setNewWorktreeRowArgs] = useState<string[]>([""]);
   const [newWorktreeSharedArgs, setNewWorktreeSharedArgs] = useState<string>("");
   const [newWorktreeRowErrors, setNewWorktreeRowErrors] = useState<Record<number, string[]>>({});
+  const [deleteTarget, setDeleteTarget] = useState<WorktreeResource | undefined>();
 
   const selectedRepository = useMemo(() => {
     if (!appState) {
@@ -445,6 +449,36 @@ export function App(): JSX.Element {
     }
   }
 
+  async function deleteLinkedWorktree(deleteBranch: boolean): Promise<void> {
+    if (!selectedRepository || !deleteTarget) {
+      return;
+    }
+
+    setBusyAction(`worktree.delete:${deleteTarget.worktreeId}`);
+    setBanner(undefined);
+
+    try {
+      const response = await api<DeleteWorktreeResponse>(
+        `/api/repositories/${selectedRepository.repositoryId}/worktrees/${deleteTarget.worktreeId}`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ deleteBranch }),
+        },
+      );
+
+      setAppState(response.state);
+      setDeleteTarget(undefined);
+      setBanner({
+        tone: response.result.status === "warning" ? "warning" : "success",
+        text: response.result.summary,
+      });
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
+    } finally {
+      setBusyAction(undefined);
+    }
+  }
+
   if (loadFailure) {
     return (
       <main className="bootScreen">
@@ -559,7 +593,9 @@ export function App(): JSX.Element {
             repository={selectedRepository}
             selectedWorktree={selectedWorktree}
             selectedWorktreeId={selectedWorktreeId}
+            isBusy={isBusy}
             onOpenDev={(worktreeId) => void openDevServer(worktreeId)}
+            onRequestDelete={setDeleteTarget}
           />
         ) : (
           <section className="emptyDashboard" aria-labelledby="choose-repository-title">
@@ -622,6 +658,15 @@ export function App(): JSX.Element {
           onUpdateSharedArgs={setNewWorktreeSharedArgs}
           onAddRow={addNewWorktreeRow}
           onRemoveRow={removeNewWorktreeRow}
+        />
+      ) : null}
+
+      {deleteTarget ? (
+        <DeleteWorktreeDialog
+          worktree={deleteTarget}
+          isBusy={isBusy}
+          onClose={() => setDeleteTarget(undefined)}
+          onConfirm={(deleteBranch) => void deleteLinkedWorktree(deleteBranch)}
         />
       ) : null}
     </main>

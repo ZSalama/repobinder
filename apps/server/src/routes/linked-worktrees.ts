@@ -9,6 +9,7 @@ import { ApiError, toApiError } from "../lib/errors";
 import { compactJsonObject, nowIso } from "../lib/json";
 import {
   argsContainPort,
+  isRecord,
   readNewWorktreeRequest,
   readOptionalString,
   readRequiredString,
@@ -20,6 +21,7 @@ import { createWorktreeRecord, isWorktreeDirty, resolveBatchRows, validateBatchR
 import { runGit } from "../git/exec";
 import { reserveBatchPorts, runSetupScript, SetupRunResult, TrackedProcessInput } from "../setup/run";
 import { probeDevServerStatus, probeProcessStatus } from "../setup/devserver";
+import { stopProcessTree, StopProcessTreeResult } from "../setup/processes";
 import { broadcast } from "../sockets";
 import {
   appendOperationRecord,
@@ -55,6 +57,26 @@ type RowOutcome = {
   setup?: SetupRunResult;
   devServerStatus?: DevServerStatus;
 };
+
+type ProcessStopOutcome = StopProcessTreeResult & {
+  processRecordId: string;
+  role: string;
+};
+
+type WorktreeRemoveOutcome =
+  | { status: "removed" }
+  | { status: "already_missing" }
+  | { status: "failed"; error: string };
+
+type PruneOutcome = { status: "not_needed" } | { status: "pruned" } | { status: "failed"; error: string };
+
+type BranchDeleteOutcome =
+  | { status: "not_requested" }
+  | { status: "skipped"; reason: string }
+  | { status: "deleted"; branch: string }
+  | { status: "failed"; branch: string; error: string };
+
+type SoftDeleteOutcome = { status: "applied" } | { status: "not_applied"; reason: string };
 
 export const linkedWorktreesRouter = Router();
 
@@ -157,6 +179,175 @@ linkedWorktreesRouter.post("/api/repositories/:repositoryId/worktrees/existing",
         repositoryId,
         details: compactJsonObject({
           worktreePath: requestedWorktreePath,
+          error: toApiError(error).message,
+        }),
+      });
+    }
+
+    next(error);
+  }
+});
+
+linkedWorktreesRouter.delete("/api/repositories/:repositoryId/worktrees/:worktreeId", async (request, response, next) => {
+  const repositoryId = readRouteParam(request, "repositoryId");
+  const worktreeId = readRouteParam(request, "worktreeId");
+  const requestedDeleteBranch =
+    isRecord(request.body) && typeof request.body.deleteBranch === "boolean" ? request.body.deleteBranch : undefined;
+
+  try {
+    const result = await runExclusiveMutation("worktree.delete", async () => {
+      const store = await localStore.read();
+      const repository = findVisibleRepository(store, repositoryId);
+      const worktree = findVisibleWorktree(store, repositoryId, worktreeId);
+
+      if (worktree.type !== "linked") {
+        throw new ApiError(400, "Primary Worktrees cannot be deleted");
+      }
+
+      const deleteBranch = requestedDeleteBranch ?? worktree.createdByRepoBinder;
+      const trackedProcesses = store.trackedProcesses.filter(
+        (processRecord) => processRecord.repositoryId === repositoryId && processRecord.worktreeId === worktreeId,
+      );
+      const processStops: ProcessStopOutcome[] = [];
+
+      for (const processRecord of trackedProcesses) {
+        processStops.push({
+          ...(await stopProcessTree(processRecord.pid)),
+          processRecordId: processRecord.processRecordId,
+          role: processRecord.role,
+        });
+      }
+
+      const removeOutcome = await removeLinkedWorktree(repository.primaryWorktreePath, worktree);
+      const pruneOutcome: PruneOutcome =
+        removeOutcome.status === "already_missing" ? await pruneWorktrees(repository.primaryWorktreePath) : { status: "not_needed" };
+      const branchOutcome =
+        removeOutcome.status === "failed"
+          ? ({ status: "not_requested" } as const)
+          : await deleteBranchSafely(repository.primaryWorktreePath, worktree.branch, deleteBranch);
+      const hardFailed = removeOutcome.status === "failed";
+      const softDeleteOutcome: SoftDeleteOutcome = hardFailed
+        ? { status: "not_applied", reason: "Worktree removal failed" }
+        : { status: "applied" };
+      const status = hardFailed
+        ? "failed"
+        : hasDeleteWarnings(processStops, pruneOutcome, branchOutcome)
+          ? "warning"
+          : "success";
+      const summary = buildDeleteSummary(removeOutcome, branchOutcome, processStops, pruneOutcome);
+
+      const state = await localStore.update((mutableStore) => {
+        const timestamp = nowIso();
+        const mutableRepository = findVisibleRepository(mutableStore, repositoryId);
+        const mutableWorktree = findVisibleWorktree(mutableStore, repositoryId, worktreeId);
+
+        for (const processStop of processStops) {
+          const mutableProcess = mutableStore.trackedProcesses.find(
+            (record) => record.processRecordId === processStop.processRecordId,
+          );
+
+          if (!mutableProcess) {
+            continue;
+          }
+
+          mutableProcess.status = processStop.status === "failed" ? "failed" : "stopped";
+          mutableProcess.updatedAt = timestamp;
+
+          if (mutableProcess.status === "stopped" && !mutableProcess.stoppedAt) {
+            mutableProcess.stoppedAt = timestamp;
+          }
+        }
+
+        if (!hardFailed) {
+          mutableWorktree.deletedAt = timestamp;
+          mutableWorktree.updatedAt = timestamp;
+          mutableWorktree.availability = "missing";
+
+          if (mutableWorktree.devServer) {
+            mutableWorktree.devServer = {
+              ...mutableWorktree.devServer,
+              status: "stopped",
+              updatedAt: timestamp,
+            };
+          }
+
+          if (mutableStore.selection.worktreeId === worktreeId) {
+            mutableStore.selection = {
+              repositoryId,
+              worktreeId: mutableRepository.primaryWorktreeId,
+              updatedAt: timestamp,
+            };
+          }
+
+          mutableRepository.updatedAt = timestamp;
+        }
+
+        appendOperationRecord(mutableStore, {
+          type: "worktree.delete",
+          status,
+          severity: status === "failed" ? "error" : status,
+          summary,
+          repositoryId,
+          worktreeId,
+          details: compactJsonObject({
+            worktreePath: worktree.worktreePath,
+            branch: worktree.branch,
+            deleteBranch,
+            worktreeRemove: removeOutcome as unknown as JsonValue,
+            prune: pruneOutcome as unknown as JsonValue,
+            branchDelete: branchOutcome as unknown as JsonValue,
+            softDelete: softDeleteOutcome as unknown as JsonValue,
+            processStops: processStops.map((processStop) =>
+              compactJsonObject({
+                processRecordId: processStop.processRecordId,
+                role: processStop.role,
+                pid: processStop.pid,
+                status: processStop.status,
+                forceUsed: processStop.forceUsed,
+                descendants: processStop.descendants as JsonValue,
+                error: processStop.error,
+              }),
+            ) as JsonValue,
+          }),
+        });
+
+        return buildAppStateResource(mutableStore);
+      });
+
+      if (hardFailed) {
+        throw markOperationRecorded(new ApiError(400, removeOutcome.error));
+      }
+
+      return {
+        state,
+        result: {
+          status,
+          summary,
+          deleteBranch,
+          worktreeRemove: removeOutcome,
+          prune: pruneOutcome,
+          branchDelete: branchOutcome,
+          softDelete: softDeleteOutcome,
+          processStops,
+        },
+      };
+    });
+
+    broadcast({ type: "state.changed", reason: "worktree.delete" });
+    response.json(result);
+  } catch (error) {
+    if (isOperationRecordedError(error)) {
+      broadcast({ type: "state.changed", reason: "worktree.delete" });
+    } else {
+      await recordOperationSafely({
+        type: "worktree.delete",
+        status: "failed",
+        severity: "error",
+        summary: "Linked Worktree deletion failed",
+        repositoryId,
+        worktreeId,
+        details: compactJsonObject({
+          deleteBranch: requestedDeleteBranch,
           error: toApiError(error).message,
         }),
       });
@@ -523,4 +714,123 @@ function buildBatchSummary(input: {
   }
 
   return notes.length > 0 ? `${base} (${notes.join(", ")})` : base;
+}
+
+function findVisibleWorktree(store: { worktrees: WorktreeRecord[] }, repositoryId: string, worktreeId: string): WorktreeRecord {
+  const worktree = store.worktrees.find(
+    (record) => record.worktreeId === worktreeId && record.repositoryId === repositoryId && !record.deletedAt,
+  );
+
+  if (!worktree) {
+    throw new ApiError(404, `Worktree Record not found: ${worktreeId}`);
+  }
+
+  return worktree;
+}
+
+async function removeLinkedWorktree(repositoryPath: string, worktree: WorktreeRecord): Promise<WorktreeRemoveOutcome> {
+  if (!(await worktreePathExists(worktree))) {
+    return { status: "already_missing" };
+  }
+
+  try {
+    await runGit(repositoryPath, ["worktree", "remove", worktree.worktreePath]);
+    return { status: "removed" };
+  } catch (error) {
+    return { status: "failed", error: toApiError(error).message };
+  }
+}
+
+async function pruneWorktrees(repositoryPath: string): Promise<PruneOutcome> {
+  try {
+    await runGit(repositoryPath, ["worktree", "prune"]);
+    return { status: "pruned" };
+  } catch (error) {
+    return { status: "failed", error: toApiError(error).message };
+  }
+}
+
+async function deleteBranchSafely(
+  repositoryPath: string,
+  branch: string | undefined,
+  deleteBranch: boolean,
+): Promise<BranchDeleteOutcome> {
+  if (!deleteBranch) {
+    return { status: "not_requested" };
+  }
+
+  if (!branch) {
+    return { status: "skipped", reason: "Worktree has no Branch" };
+  }
+
+  try {
+    await runGit(repositoryPath, ["branch", "-d", branch]);
+    return { status: "deleted", branch };
+  } catch (error) {
+    return { status: "failed", branch, error: toApiError(error).message };
+  }
+}
+
+async function worktreePathExists(worktree: WorktreeRecord): Promise<boolean> {
+  return (await pathExists(worktree.worktreePath)) || (await pathExists(worktree.realWorktreePath));
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasDeleteWarnings(
+  processStops: ProcessStopOutcome[],
+  pruneOutcome: PruneOutcome,
+  branchOutcome: BranchDeleteOutcome,
+): boolean {
+  return (
+    processStops.some((processStop) => processStop.status === "failed") ||
+    pruneOutcome.status === "failed" ||
+    branchOutcome.status === "failed"
+  );
+}
+
+function buildDeleteSummary(
+  removeOutcome: WorktreeRemoveOutcome,
+  branchOutcome: BranchDeleteOutcome,
+  processStops: ProcessStopOutcome[],
+  pruneOutcome: PruneOutcome,
+): string {
+  if (removeOutcome.status === "failed") {
+    return "Linked Worktree deletion failed";
+  }
+
+  const base =
+    removeOutcome.status === "already_missing" ? "Linked Worktree was already removed" : "Linked Worktree removed";
+  const withBranch = branchOutcome.status === "deleted" ? `${base} and Branch deleted` : base;
+  const notes: string[] = [];
+  const failedProcessCount = processStops.filter((processStop) => processStop.status === "failed").length;
+
+  if (failedProcessCount > 0) {
+    notes.push(`${failedProcessCount} process cleanup failure${failedProcessCount === 1 ? "" : "s"}`);
+  }
+
+  if (pruneOutcome.status === "failed") {
+    notes.push("Git worktree prune failed");
+  }
+
+  if (branchOutcome.status === "failed") {
+    notes.push("Branch delete failed");
+  }
+
+  return notes.length > 0 ? `${withBranch} (${notes.join(", ")})` : withBranch;
+}
+
+function markOperationRecorded(error: ApiError): ApiError & { operationRecorded: true } {
+  return Object.assign(error, { operationRecorded: true as const });
+}
+
+function isOperationRecordedError(error: unknown): error is ApiError & { operationRecorded: true } {
+  return error instanceof ApiError && "operationRecorded" in error;
 }

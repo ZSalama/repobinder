@@ -430,6 +430,15 @@ button:focus-visible {
   border-color: var(--line);
 }
 
+.dangerButton {
+  color: var(--red);
+}
+
+.dangerButton:hover:not(:disabled) {
+  border-color: rgb(255 141 126 / 28%);
+  background: rgb(255 141 126 / 10%);
+}
+
 .statusPill {
   gap: 6px;
   min-height: 32px;
@@ -583,7 +592,7 @@ button:focus-visible {
 .worktreeTableHeader,
 .worktreeRow {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 112px minmax(220px, 1.3fr) 136px 146px 116px;
+  grid-template-columns: minmax(180px, 1fr) 112px minmax(220px, 1.3fr) 136px 146px 154px;
   gap: 12px;
   align-items: center;
 }
@@ -753,6 +762,111 @@ button:focus-visible {
   border-left: 1px solid var(--line);
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.dialogLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(0 0 0 / 58%);
+}
+
+.confirmDialog {
+  width: min(520px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.dialogHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialogHeader h2 {
+  margin: 2px 0 0;
+  font-size: 1.08rem;
+  line-height: 1.15;
+}
+
+.dangerMark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgb(255 141 126 / 32%);
+  border-radius: 8px;
+  color: var(--red);
+  background: rgb(255 141 126 / 10%);
+}
+
+.dialogBody {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.consequenceItem {
+  display: grid;
+  gap: 5px;
+}
+
+.consequenceItem span,
+.branchDeleteToggle span {
+  font-size: 0.88rem;
+  font-weight: 760;
+}
+
+.consequenceItem small {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.consequenceItem code {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.branchDeleteToggle {
+  align-items: flex-start;
+}
+
+.processWarning {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 9px 10px;
+  border: 1px solid rgb(241 191 98 / 24%);
+  border-radius: 8px;
+  color: var(--amber);
+  background: rgb(241 191 98 / 9%);
+  font-size: 0.86rem;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 18px 18px;
+}
+
+.destructiveAction {
+  color: var(--destructive-foreground);
+  background: var(--red);
+}
+
+.destructiveAction:hover:not(:disabled) {
+  background: #ffa197;
 }
 
 .mobileSidebarSheet {
@@ -959,7 +1073,13 @@ button:focus-visible {
   }
 
   .sheetActions .secondaryButton,
-  .sheetActions .primaryButton.inlineButton {
+  .sheetActions .primaryButton.inlineButton,
+  .dialogActions .secondaryButton,
+  .dialogActions .primaryButton.inlineButton {
     width: 100%;
+  }
+
+  .dialogActions {
+    flex-direction: column;
   }
 }

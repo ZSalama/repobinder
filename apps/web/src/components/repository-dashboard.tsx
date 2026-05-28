@@ -1,4 +1,4 @@
-import { ExternalLink, GitBranch } from "lucide-react";
+import { ExternalLink, GitBranch, Trash2 } from "lucide-react";
 
 import { Metric, StatusBadge } from "@/components/status-display";
 import { devServerTone, formatDevServer, formatSetupStatus, setupTone } from "@/lib/format";
@@ -8,7 +8,9 @@ export function RepositoryDashboard(props: {
   repository: RepositoryResource;
   selectedWorktree?: WorktreeResource;
   selectedWorktreeId?: string;
+  isBusy: boolean;
   onOpenDev: (worktreeId: string) => void;
+  onRequestDelete: (worktree: WorktreeResource) => void;
 }): JSX.Element {
   const linkedCount = props.repository.worktrees.filter((worktree) => worktree.type === "linked").length;
 
@@ -44,7 +46,9 @@ export function RepositoryDashboard(props: {
               key={worktree.worktreeId}
               worktree={worktree}
               selected={worktree.worktreeId === props.selectedWorktreeId}
+              isBusy={props.isBusy}
               onOpenDev={props.onOpenDev}
+              onRequestDelete={props.onRequestDelete}
             />
           ))}
         </div>
@@ -56,7 +60,9 @@ export function RepositoryDashboard(props: {
 function WorktreeRow(props: {
   worktree: WorktreeResource;
   selected: boolean;
+  isBusy: boolean;
   onOpenDev: (worktreeId: string) => void;
+  onRequestDelete: (worktree: WorktreeResource) => void;
 }): JSX.Element {
   const { worktree } = props;
   const runningProcesses = worktree.trackedProcesses.filter((process) => process.status === "running");
@@ -101,6 +107,18 @@ function WorktreeRow(props: {
           >
             <ExternalLink size={15} />
             <span>Open Dev</span>
+          </button>
+        ) : null}
+        {worktree.type === "linked" ? (
+          <button
+            className="iconButton dangerButton"
+            type="button"
+            title="Delete Linked Worktree"
+            aria-label={`Delete Linked Worktree for ${worktree.branch ?? "detached Worktree"}`}
+            disabled={props.isBusy}
+            onClick={() => props.onRequestDelete(worktree)}
+          >
+            <Trash2 size={15} />
           </button>
         ) : null}
       </div>
