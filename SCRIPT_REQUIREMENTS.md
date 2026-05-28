@@ -1,6 +1,6 @@
-# Worktree Setup Script Requirements
+# RepoBinder Worktree Setup Script Requirements
 
-This document describes the contract for a repository-owned Worktree Setup Script used by the current RepoBinder app.
+This document describes the contract for a repository-owned Worktree Setup Script used by RepoBinder.
 
 Use this document to guide an LLM or a developer when creating a setup script for a project that will be managed by RepoBinder.
 
@@ -30,24 +30,6 @@ The Worktree Setup Script is responsible for:
 - Optionally reporting setup status, warnings, Dev Server metadata, and process metadata as JSON.
 
 The Worktree Setup Script must not be the source of truth for Branch, Worktree Path, Repository, or Worktree Record state.
-
-## Legacy Concepts To Avoid
-
-The legacy `Workspace Script` contract no longer applies.
-
-Do not build a script that:
-
-- Creates Git worktrees.
-- Removes Git worktrees.
-- Creates or deletes Branches.
-- Fetches, pulls, checks out, rebases, or merges as part of RepoBinder setup.
-- Returns `workspacePath` for registration.
-- Returns `workspaceName` for display.
-- Uses `ok` or `agentRunnable` to tell RepoBinder whether setup succeeded.
-- Starts or configures Codex.
-- Assumes RepoBinder will launch an agent from the Linked Worktree.
-
-If a script emits only legacy JSON such as `{ "ok": false, "agentRunnable": false }` and exits `0`, current RepoBinder treats the JSON object as parsed metadata but ignores those fields. Use the v1 metadata fields in this document instead.
 
 ## Repository Settings
 
@@ -224,7 +206,7 @@ RepoBinder parses setup stdout this way:
 
 - Empty stdout and exit code `0`: setup succeeds with no metadata.
 - Empty stdout and non-zero exit code: setup fails.
-- Pure JSON object on stdout: RepoBinder parses v1 metadata.
+- Pure JSON object on stdout: RepoBinder parses setup metadata.
 - Non-empty, non-JSON stdout and exit code `0`: setup succeeds, but RepoBinder records a warning that no metadata JSON was parsed.
 - Non-zero exit code: setup fails even if metadata says `success`.
 - Timeout or output truncation: setup fails.
@@ -235,7 +217,7 @@ Progress logs belong on stderr and should stay concise. Both stdout and stderr a
 
 Metadata is optional. Use it when the script needs to report warnings, Dev Server state, or Tracked Processes.
 
-Supported v1 metadata shape:
+Supported metadata shape:
 
 ```json
 {
@@ -280,11 +262,10 @@ Unknown fields are ignored.
 
 Metadata requirements:
 
-- Use `status`, not `ok`.
-- Use `warnings`, not `errorMessage`, for warning text.
-- Use `devServer` and `processes`, not `logs.dev` or `processes.dev`.
-- Do not include `agentRunnable`.
-- Do not include `workspacePath` as a registration signal.
+- Use `status` for setup state.
+- Use `warnings` for warning text.
+- Use `devServer` for primary Dev Server metadata.
+- Use `processes` for long-running process metadata.
 - Do not include secrets.
 
 If both `devServer.pid` and `processes` are present, RepoBinder tracks the Dev Server PID even if it is not listed in `processes`.
@@ -541,9 +522,9 @@ When asking an LLM to generate a Worktree Setup Script for a project, require it
 - [ ] The configured command is a repo-relative path such as `scripts/repobinder-setup`.
 - [ ] The script assumes `cwd` is the new Linked Worktree.
 - [ ] The script does not create, delete, fetch, pull, switch, merge, or rebase Git worktrees or Branches.
-- [ ] The script does not use legacy `workspace`, `ok`, `agentRunnable`, or Codex behavior.
+- [ ] The script stays within the Worktree Setup Script responsibility boundary.
 - [ ] The script uses stderr for logs.
-- [ ] The script emits either empty stdout or pure v1 metadata JSON.
+- [ ] The script emits either empty stdout or pure metadata JSON.
 - [ ] The script keeps stdout and stderr comfortably below 256 KiB each.
 - [ ] The script exits within 10 minutes.
 - [ ] The script handles missing optional local config with warnings.
