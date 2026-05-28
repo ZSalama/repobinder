@@ -1,10 +1,12 @@
 import { ChildProcess, spawn } from "node:child_process";
+import crypto from "node:crypto";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import type { OpenDialogOptions } from "electron";
 
 const DEFAULT_PORT = 3773;
 const LOCALHOST = "127.0.0.1";
@@ -23,6 +25,25 @@ let backendRestartTimer: NodeJS.Timeout | undefined;
 let isQuitting = false;
 let mainWindow: BrowserWindow | undefined;
 let currentConfig: BackendConfig | undefined;
+const desktopToken = crypto.randomUUID();
+
+app.setName("RepoBinder");
+process.env.REPOBINDER_DESKTOP_TOKEN = desktopToken;
+
+ipcMain.handle("repobinder:pick-folder", async () => {
+  const options: OpenDialogOptions = {
+    title: "Choose a Repository",
+    properties: ["openDirectory"],
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+
+  return result.canceled ? undefined : result.filePaths[0];
+});
+
+ipcMain.handle("repobinder:get-desktop-context", () => ({
+  platform: process.platform,
+  desktopAuthToken: desktopToken,
+}));
 
 app.whenReady().then(startDesktopApp).catch((error) => {
   console.error(error);
@@ -73,10 +94,11 @@ function createWindow(appUrl: string): BrowserWindow {
     minWidth: 900,
     minHeight: 640,
     title: "RepoBinder",
-    backgroundColor: "#f5f6f2",
+    backgroundColor: "#11140f",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.js"),
       sandbox: true,
     },
   });
@@ -102,6 +124,8 @@ function startBackend(config: BackendConfig): ChildProcess {
       ELECTRON_RUN_AS_NODE: "1",
       HOST: config.host,
       PORT: String(config.port),
+      REPOBINDER_DATA_DIR: app.getPath("userData"),
+      REPOBINDER_DESKTOP_TOKEN: desktopToken,
       REPOBINDER_WEB_DIST: webDist,
     },
     stdio: ["ignore", "pipe", "pipe"],

@@ -1,33 +1,91 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronRight,
   FolderOpen,
   GitBranch,
-  GitCommit,
-  Monitor,
+  Menu,
   Plus,
   RefreshCw,
   Server,
-  Trash2,
+  Settings,
   Wifi,
   WifiOff,
+  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type Worktree = {
-  path: string;
-  head?: string;
-  branch?: string;
-  detached: boolean;
-  bare: boolean;
-  locked?: string;
-  prunable?: string;
+type WorktreeType = "primary" | "linked";
+type SetupStatus = "not_configured" | "pending" | "running" | "success" | "warning" | "failed" | "skipped";
+type DevServerStatus = "unknown" | "running" | "stopped" | "unreachable";
+type SocketState = "connecting" | "open" | "closed";
+
+type RepositorySettings = {
+  repositoryId: string;
+  setup: {
+    enabled: boolean;
+    command?: string;
+    defaultArgs: string[];
+    autoStartDevServer: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
 };
 
-type RepositoryInspection = {
-  repositoryPath: string;
-  worktrees: Worktree[];
-  branches: string[];
+type WorktreeResource = {
+  worktreeId: string;
+  repositoryId: string;
+  type: WorktreeType;
+  worktreePath: string;
+  realWorktreePath: string;
+  gitCommonDir: string;
+  branch?: string;
+  head?: string;
+  availability: "available" | "missing" | "unknown";
+  locked?: string;
+  prunable?: string;
+  createdByRepoBinder: boolean;
+  setup: {
+    status: SetupStatus;
+    updatedAt?: string;
+    warnings: string[];
+    lastExitCode?: number;
+  };
+  devServer?: {
+    status: DevServerStatus;
+    url?: string;
+    port?: number;
+    pid?: number;
+    updatedAt?: string;
+  };
+  trackedProcesses: unknown[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type RepositoryResource = {
+  repositoryId: string;
+  displayName: string;
+  primaryWorktreeId: string;
+  primaryWorktreePath: string;
+  realPrimaryWorktreePath: string;
+  gitCommonDir: string;
+  settings: RepositorySettings;
+  primaryWorktree?: WorktreeResource;
+  worktrees: WorktreeResource[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AppStateResource = {
+  schemaVersion: number;
+  selection: {
+    repositoryId?: string;
+    worktreeId?: string;
+    updatedAt?: string;
+  };
+  repositories: RepositoryResource[];
+  operations: unknown[];
 };
 
 type ServerInfo = {
@@ -38,27 +96,70 @@ type ServerInfo = {
   advertisedUrls: string[];
 };
 
-type SocketState = "connecting" | "open" | "closed";
+type DesktopContext = {
+  platform: string;
+  desktopAuthToken: string;
+};
 
-const repositoryStorageKey = "repobinder.repositoryPath";
+type SettingsDraft = {
+  setupEnabled: boolean;
+  command: string;
+  defaultArgsText: string;
+  autoStartDevServer: boolean;
+};
+
+type Banner = {
+  tone: "success" | "warning" | "danger" | "info";
+  text: string;
+};
+
+declare global {
+  interface Window {
+    repobinderDesktop?: {
+      getDesktopContext: () => Promise<DesktopContext>;
+      pickRepositoryFolder: () => Promise<string | undefined>;
+    };
+  }
+}
 
 export function App(): JSX.Element {
   const [serverInfo, setServerInfo] = useState<ServerInfo | undefined>();
+  const [desktopContext, setDesktopContext] = useState<DesktopContext | undefined>();
+  const [appState, setAppState] = useState<AppStateResource | undefined>();
   const [socketState, setSocketState] = useState<SocketState>("connecting");
-  const [repositoryPath, setRepositoryPath] = useState(() => localStorage.getItem(repositoryStorageKey) || "");
-  const [inspection, setInspection] = useState<RepositoryInspection | undefined>();
-  const [worktreePath, setWorktreePath] = useState("");
-  const [branchName, setBranchName] = useState("");
-  const [baseRef, setBaseRef] = useState("");
-  const [createBranch, setCreateBranch] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | undefined>();
-  const [error, setError] = useState<string | undefined>();
+  const [loadFailure, setLoadFailure] = useState<string | undefined>();
+  const [busyAction, setBusyAction] = useState<string | undefined>();
+  const [banner, setBanner] = useState<Banner | undefined>();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | undefined>();
+
+  const selectedRepository = useMemo(() => {
+    if (!appState) {
+      return undefined;
+    }
+
+    return (
+      appState.repositories.find((repository) => repository.repositoryId === appState.selection.repositoryId) ??
+      appState.repositories[0]
+    );
+  }, [appState]);
+
+  const selectedWorktreeId = appState?.selection.worktreeId ?? selectedRepository?.primaryWorktreeId;
+  const selectedWorktree = selectedRepository?.worktrees.find((worktree) => worktree.worktreeId === selectedWorktreeId);
+  const isDesktop = Boolean(window.repobinderDesktop && desktopContext?.desktopAuthToken);
+  const isBusy = Boolean(busyAction);
 
   useEffect(() => {
-    api<ServerInfo>("/api/server").then(setServerInfo).catch((apiError: unknown) => {
-      setError(toErrorMessage(apiError));
-    });
+    document.documentElement.classList.add("dark");
+
+    return () => {
+      document.documentElement.classList.remove("dark");
+    };
+  }, []);
+
+  useEffect(() => {
+    void boot();
   }, []);
 
   useEffect(() => {
@@ -66,329 +167,617 @@ export function App(): JSX.Element {
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     setSocketState("connecting");
-
     socket.addEventListener("open", () => setSocketState("open"));
     socket.addEventListener("close", () => setSocketState("closed"));
     socket.addEventListener("error", () => setSocketState("closed"));
     socket.addEventListener("message", (event) => {
       const payload = safeParseSocketMessage(event.data);
 
-      if (payload?.type === "worktrees.changed" && inspection?.repositoryPath === payload.repositoryPath) {
-        inspect(payload.repositoryPath, { silent: true }).catch((apiError: unknown) => {
-          setError(toErrorMessage(apiError));
-        });
+      if (
+        payload?.type === "state.changed" ||
+        payload?.type === "operations.changed" ||
+        payload?.type === "worktrees.changed"
+      ) {
+        void refreshState({ silent: true });
       }
     });
 
     return () => {
       socket.close();
     };
-  }, [inspection?.repositoryPath]);
+  }, []);
 
-  const primaryPath = inspection?.worktrees[0]?.path;
-  const worktreeCount = inspection?.worktrees.length ?? 0;
-  const branchCount = inspection?.branches.length ?? 0;
-
-  const branchOptions = useMemo(() => {
-    const options = new Set(inspection?.branches ?? []);
-
-    if (branchName) {
-      options.add(branchName);
-    }
-
-    return [...options].sort((left, right) => left.localeCompare(right));
-  }, [branchName, inspection?.branches]);
-
-  async function inspect(pathToInspect = repositoryPath, options: { silent?: boolean } = {}): Promise<void> {
-    if (!pathToInspect.trim()) {
-      setError("Repository path is required");
+  useEffect(() => {
+    if (!settingsOpen || !selectedRepository) {
       return;
     }
 
-    setBusy(true);
-    setError(undefined);
+    setSettingsDraft(createSettingsDraft(selectedRepository.settings));
+  }, [selectedRepository, settingsOpen]);
 
-    if (!options.silent) {
-      setMessage(undefined);
-    }
+  async function boot(): Promise<void> {
+    setLoadFailure(undefined);
 
     try {
-      const nextInspection = await api<RepositoryInspection>("/api/repositories/inspect", {
-        method: "POST",
-        body: JSON.stringify({ repositoryPath: pathToInspect }),
-      });
+      const desktop = await window.repobinderDesktop?.getDesktopContext().catch(() => undefined);
+      const [nextServerInfo, nextState] = await Promise.all([
+        api<ServerInfo>("/api/server"),
+        api<AppStateResource>("/api/state"),
+      ]);
 
-      setInspection(nextInspection);
-      setRepositoryPath(nextInspection.repositoryPath);
-      localStorage.setItem(repositoryStorageKey, nextInspection.repositoryPath);
-
-      if (!options.silent) {
-        setMessage(`Loaded ${nextInspection.repositoryPath}`);
-      }
-    } catch (apiError) {
-      setError(toErrorMessage(apiError));
-    } finally {
-      setBusy(false);
+      setDesktopContext(desktop);
+      setServerInfo(nextServerInfo);
+      setAppState(nextState);
+    } catch (error) {
+      setLoadFailure(toErrorMessage(error));
     }
   }
 
-  async function createWorktree(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function refreshState(options: { silent?: boolean } = {}): Promise<void> {
+    if (!options.silent) {
+      setBusyAction("refresh");
+      setBanner(undefined);
+    }
+
+    try {
+      const nextState = await api<AppStateResource>("/api/state");
+      setAppState(nextState);
+    } catch (error) {
+      if (!options.silent) {
+        setBanner({ tone: "danger", text: toErrorMessage(error) });
+      }
+    } finally {
+      if (!options.silent) {
+        setBusyAction(undefined);
+      }
+    }
+  }
+
+  async function addRepository(): Promise<void> {
+    if (!window.repobinderDesktop || !desktopContext) {
+      return;
+    }
+
+    setBusyAction("repository.add");
+    setBanner(undefined);
+
+    try {
+      const repositoryPath = await window.repobinderDesktop.pickRepositoryFolder();
+
+      if (!repositoryPath) {
+        return;
+      }
+
+      const nextState = await api<AppStateResource>(
+        "/api/repositories",
+        {
+          method: "POST",
+          body: JSON.stringify({ repositoryPath }),
+        },
+        desktopContext,
+      );
+
+      setAppState(nextState);
+      setBanner({ tone: "success", text: "Repository added" });
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
+    } finally {
+      setBusyAction(undefined);
+    }
+  }
+
+  async function selectRepository(repositoryId: string, worktreeId?: string): Promise<void> {
+    setBusyAction(`selection:${worktreeId ?? repositoryId}`);
+
+    try {
+      const nextState = await api<AppStateResource>("/api/selection", {
+        method: "PATCH",
+        body: JSON.stringify({ repositoryId, worktreeId }),
+      });
+
+      setAppState(nextState);
+      setMobileSidebarOpen(false);
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
+    } finally {
+      setBusyAction(undefined);
+    }
+  }
+
+  function openSettings(): void {
+    if (!selectedRepository) {
+      return;
+    }
+
+    setSettingsDraft(createSettingsDraft(selectedRepository.settings));
+    setSettingsOpen(true);
+  }
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (!inspection) {
-      setError("Load a repository first");
+    if (!selectedRepository || !settingsDraft) {
       return;
     }
 
-    setBusy(true);
-    setError(undefined);
-    setMessage(undefined);
+    setBusyAction("settings.save");
+    setBanner(undefined);
 
     try {
-      const nextInspection = await api<RepositoryInspection>("/api/worktrees", {
-        method: "POST",
+      const nextState = await api<AppStateResource>(`/api/repositories/${selectedRepository.repositoryId}/settings`, {
+        method: "PATCH",
         body: JSON.stringify({
-          repositoryPath: inspection.repositoryPath,
-          worktreePath,
-          branchName,
-          baseRef,
-          createBranch,
+          setup: {
+            enabled: settingsDraft.setupEnabled,
+            command: settingsDraft.command,
+            defaultArgs: parseArgsText(settingsDraft.defaultArgsText),
+            autoStartDevServer: settingsDraft.autoStartDevServer,
+          },
         }),
       });
 
-      setInspection(nextInspection);
-      setWorktreePath("");
-      setBranchName("");
-      setBaseRef("");
-      setMessage("Worktree created");
-    } catch (apiError) {
-      setError(toErrorMessage(apiError));
+      setAppState(nextState);
+      setSettingsOpen(false);
+      setBanner({ tone: "success", text: "Repository Settings saved" });
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
-      setBusy(false);
+      setBusyAction(undefined);
     }
   }
 
-  async function removeWorktree(targetPath: string): Promise<void> {
-    if (!inspection) {
+  async function addExistingWorktree(): Promise<void> {
+    if (!selectedRepository || !window.repobinderDesktop || !desktopContext) {
       return;
     }
 
-    if (!window.confirm(`Remove ${targetPath}?`)) {
-      return;
-    }
-
-    setBusy(true);
-    setError(undefined);
-    setMessage(undefined);
+    setBusyAction("worktree.add-existing");
+    setBanner(undefined);
 
     try {
-      const nextInspection = await api<RepositoryInspection>("/api/worktrees/remove", {
-        method: "POST",
-        body: JSON.stringify({
-          repositoryPath: inspection.repositoryPath,
-          worktreePath: targetPath,
-        }),
-      });
+      const worktreePath = await window.repobinderDesktop.pickRepositoryFolder();
 
-      setInspection(nextInspection);
-      setMessage("Worktree removed");
-    } catch (apiError) {
-      setError(toErrorMessage(apiError));
+      if (!worktreePath) {
+        return;
+      }
+
+      const nextState = await api<AppStateResource>(
+        `/api/repositories/${selectedRepository.repositoryId}/worktrees/existing`,
+        {
+          method: "POST",
+          body: JSON.stringify({ worktreePath }),
+        },
+        desktopContext,
+      );
+
+      setAppState(nextState);
+      setBanner({ tone: "success", text: "Existing Linked Worktree added" });
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
     } finally {
-      setBusy(false);
+      setBusyAction(undefined);
     }
+  }
+
+  if (loadFailure) {
+    return (
+      <main className="bootScreen">
+        <section className="bootPanel" aria-labelledby="startup-failed-title">
+          <div className="brandMark" aria-hidden="true">
+            <GitBranch size={22} />
+          </div>
+          <h1 id="startup-failed-title">RepoBinder</h1>
+          <p>{loadFailure}</p>
+          <button className="primaryButton inlineButton" type="button" onClick={() => void boot()}>
+            <RefreshCw size={16} />
+            <span>Retry</span>
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (!serverInfo || !appState) {
+    return (
+      <main className="bootScreen" aria-label="Loading RepoBinder">
+        <div className="loadingMark">
+          <RefreshCw size={22} className="spin" />
+        </div>
+      </main>
+    );
   }
 
   return (
-    <main className="appShell">
-      <header className="topBar">
-        <div className="brandBlock">
-          <div className="brandMark" aria-hidden="true">
-            <GitBranch size={20} />
+    <main className="dashboardShell">
+      <aside className="sidebarFrame desktopSidebar" aria-label="Repositories">
+        <SidebarContent
+          appState={appState}
+          selectedRepositoryId={selectedRepository?.repositoryId}
+          selectedWorktreeId={selectedWorktreeId}
+          isDesktop={isDesktop}
+          isBusy={isBusy}
+          onAddRepository={() => void addRepository()}
+          onSelectRepository={(repositoryId, worktreeId) => void selectRepository(repositoryId, worktreeId)}
+        />
+      </aside>
+
+      <section className="contentFrame">
+        <header className="mobileTopBar">
+          <button
+            className="iconButton"
+            type="button"
+            aria-label="Open repositories"
+            onClick={() => setMobileSidebarOpen(true)}
+          >
+            <Menu size={18} />
+          </button>
+          <div className="mobileTitle">
+            <GitBranch size={18} />
+            <span>RepoBinder</span>
           </div>
-          <div>
-            <h1>RepoBinder</h1>
-            <p>{inspection?.repositoryPath || "No repository loaded"}</p>
+          <ConnectionPill socketState={socketState} remoteEnabled={serverInfo.remoteEnabled} />
+        </header>
+
+        <header className="contentHeader">
+          <div className="titleStack">
+            <p className="eyebrow">Selected Repository</p>
+            <h1>{selectedRepository?.displayName ?? "Choose a Repository"}</h1>
+            <code>{selectedRepository?.primaryWorktreePath ?? "No Repository selected"}</code>
           </div>
-        </div>
 
-        <div className="statusStrip">
-          <StatusPill
-            icon={serverInfo?.remoteEnabled ? <Wifi size={16} /> : <Monitor size={16} />}
-            tone={serverInfo?.remoteEnabled ? "warning" : "neutral"}
-            label={serverInfo?.remoteEnabled ? "Network" : "Local"}
-          />
-          <StatusPill
-            icon={socketState === "open" ? <Server size={16} /> : <WifiOff size={16} />}
-            tone={socketState === "open" ? "success" : "danger"}
-            label={socketState === "open" ? "Live" : "Offline"}
-          />
-        </div>
-      </header>
-
-      <section className="metricsBand" aria-label="Repository summary">
-        <Metric label="Worktrees" value={worktreeCount} />
-        <Metric label="Branches" value={branchCount} />
-        <Metric label="Port" value={serverInfo?.port ?? "--"} />
-      </section>
-
-      <section className="workspaceGrid">
-        <aside className="controlPanel">
-          <form className="stack" onSubmit={(event) => void submitInspect(event, inspect)}>
-            <label>
-              <span>Repository path</span>
-              <input
-                value={repositoryPath}
-                onChange={(event) => setRepositoryPath(event.target.value)}
-                placeholder="/path/to/repository"
-                autoComplete="off"
-              />
-            </label>
-
-            <button className="primaryButton" type="submit" disabled={busy}>
-              {busy ? <RefreshCw size={18} className="spin" /> : <FolderOpen size={18} />}
-              <span>Load Repository</span>
-            </button>
-          </form>
-
-          <form className="stack divider" onSubmit={(event) => void createWorktree(event)}>
-            <label>
-              <span>Worktree path</span>
-              <input
-                value={worktreePath}
-                onChange={(event) => setWorktreePath(event.target.value)}
-                placeholder="/path/to/new-worktree"
-                autoComplete="off"
-              />
-            </label>
-
-            <label>
-              <span>Branch or ref</span>
-              <input
-                value={branchName}
-                onChange={(event) => setBranchName(event.target.value)}
-                placeholder="feature/branch-name"
-                list="branch-options"
-                autoComplete="off"
-              />
-            </label>
-
-            <datalist id="branch-options">
-              {branchOptions.map((branch) => (
-                <option value={branch} key={branch} />
-              ))}
-            </datalist>
-
-            <label>
-              <span>Base ref</span>
-              <input
-                value={baseRef}
-                onChange={(event) => setBaseRef(event.target.value)}
-                placeholder="main"
-                autoComplete="off"
-              />
-            </label>
-
-            <label className="checkboxRow">
-              <input
-                type="checkbox"
-                checked={createBranch}
-                onChange={(event) => setCreateBranch(event.target.checked)}
-              />
-              <span>Create branch</span>
-            </label>
-
-            <button className="primaryButton" type="submit" disabled={busy || !inspection}>
-              <Plus size={18} />
-              <span>Create Worktree</span>
-            </button>
-          </form>
-
-          {serverInfo?.remoteEnabled ? (
-            <div className="networkPanel">
-              <div className="sectionLabel">Remote URLs</div>
-              {serverInfo.advertisedUrls.map((url) => (
-                <code key={url}>{url}</code>
-              ))}
-            </div>
-          ) : null}
-        </aside>
-
-        <section className="worktreeSurface">
-          <div className="surfaceHeader">
-            <div>
-              <h2>Worktrees</h2>
-              <p>{inspection ? inspection.repositoryPath : "Load a repository to begin"}</p>
-            </div>
+          <div className="headerActions">
+            <ConnectionPill socketState={socketState} remoteEnabled={serverInfo.remoteEnabled} />
             <button
               className="iconButton"
               type="button"
-              title="Refresh"
               aria-label="Refresh"
-              disabled={busy || !inspection}
-              onClick={() => void inspect(inspection?.repositoryPath)}
+              disabled={isBusy}
+              onClick={() => void refreshState()}
             >
-              <RefreshCw size={18} className={busy ? "spin" : undefined} />
+              <RefreshCw size={18} className={busyAction === "refresh" ? "spin" : undefined} />
+            </button>
+            <button
+              className="secondaryButton"
+              type="button"
+              disabled={!selectedRepository || isBusy}
+              onClick={openSettings}
+            >
+              <Settings size={17} />
+              <span>Settings</span>
             </button>
           </div>
+        </header>
 
-          {message ? (
-            <Feedback tone="success" icon={<CheckCircle2 size={18} />} text={message} />
-          ) : null}
-          {error ? (
-            <Feedback tone="danger" icon={<AlertTriangle size={18} />} text={error} />
-          ) : null}
+        {serverInfo.remoteEnabled ? (
+          <BannerMessage tone="warning" text="Remote mode is trusted-network-only." icon={<Wifi size={17} />} />
+        ) : null}
+        {banner ? (
+          <BannerMessage
+            tone={banner.tone}
+            text={banner.text}
+            icon={banner.tone === "danger" || banner.tone === "warning" ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}
+          />
+        ) : null}
 
-          <div className="worktreeList">
-            {inspection ? (
-              inspection.worktrees.map((worktree) => {
-                const isPrimary = worktree.path === primaryPath;
-
-                return (
-                  <article className="worktreeCard" key={worktree.path}>
-                    <div className="worktreeMain">
-                      <div className="worktreeIcon" aria-hidden="true">
-                        <GitBranch size={18} />
-                      </div>
-                      <div className="worktreeText">
-                        <div className="worktreeTitle">
-                          <span>{worktree.branch || "Detached HEAD"}</span>
-                          {isPrimary ? <strong>Primary</strong> : null}
-                          {worktree.locked ? <strong>Locked</strong> : null}
-                        </div>
-                        <code>{worktree.path}</code>
-                      </div>
-                    </div>
-
-                    <div className="worktreeMeta">
-                      <span title={worktree.head || "No HEAD"}>
-                        <GitCommit size={14} />
-                        {shortSha(worktree.head)}
-                      </span>
-                      <button
-                        className="dangerButton"
-                        type="button"
-                        disabled={busy || isPrimary}
-                        title={isPrimary ? "Primary worktree cannot be removed" : "Remove worktree"}
-                        onClick={() => void removeWorktree(worktree.path)}
-                      >
-                        <Trash2 size={16} />
-                        <span>Remove</span>
-                      </button>
-                    </div>
-                  </article>
-                );
-              })
-            ) : (
-              <div className="emptyState">
-                <FolderOpen size={42} />
-                <span>No repository selected</span>
-              </div>
-            )}
-          </div>
-        </section>
+        {selectedRepository ? (
+          <RepositoryDashboard
+            repository={selectedRepository}
+            selectedWorktree={selectedWorktree}
+            selectedWorktreeId={selectedWorktreeId}
+          />
+        ) : (
+          <section className="emptyDashboard" aria-labelledby="choose-repository-title">
+            <FolderOpen size={44} />
+            <h2 id="choose-repository-title">Choose a Repository</h2>
+            {isDesktop ? (
+              <button
+                className="primaryButton inlineButton"
+                type="button"
+                disabled={isBusy}
+                onClick={() => void addRepository()}
+              >
+                <Plus size={17} />
+                <span>Add Repository</span>
+              </button>
+            ) : null}
+          </section>
+        )}
       </section>
+
+      {mobileSidebarOpen ? (
+        <div className="sheetLayer" role="presentation" onMouseDown={() => setMobileSidebarOpen(false)}>
+          <aside
+            className="mobileSidebarSheet"
+            aria-label="Repositories"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button className="iconButton closeButton" type="button" aria-label="Close" onClick={() => setMobileSidebarOpen(false)}>
+              <X size={18} />
+            </button>
+            <SidebarContent
+              appState={appState}
+              selectedRepositoryId={selectedRepository?.repositoryId}
+              selectedWorktreeId={selectedWorktreeId}
+              isDesktop={isDesktop}
+              isBusy={isBusy}
+              onAddRepository={() => void addRepository()}
+              onSelectRepository={(repositoryId, worktreeId) => void selectRepository(repositoryId, worktreeId)}
+            />
+          </aside>
+        </div>
+      ) : null}
+
+      {settingsOpen && selectedRepository && settingsDraft ? (
+        <div className="sheetLayer" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
+          <section
+            className="settingsSheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="repository-settings-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="sheetHeader">
+              <div>
+                <p className="eyebrow">Repository</p>
+                <h2 id="repository-settings-title">Settings</h2>
+              </div>
+              <button className="iconButton" type="button" aria-label="Close" onClick={() => setSettingsOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form className="settingsForm" onSubmit={(event) => void saveSettings(event)}>
+              <label className="toggleRow">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.setupEnabled}
+                  onChange={(event) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      setupEnabled: event.target.checked,
+                      autoStartDevServer: event.target.checked ? settingsDraft.autoStartDevServer : false,
+                    })
+                  }
+                />
+                <span>Enable Worktree Setup Script</span>
+              </label>
+
+              <label className="fieldStack">
+                <span>Command</span>
+                <input
+                  value={settingsDraft.command}
+                  onChange={(event) => setSettingsDraft({ ...settingsDraft, command: event.target.value })}
+                  placeholder="scripts/setup-worktree"
+                  disabled={!settingsDraft.setupEnabled}
+                />
+              </label>
+
+              <label className="fieldStack">
+                <span>Default args</span>
+                <textarea
+                  value={settingsDraft.defaultArgsText}
+                  onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultArgsText: event.target.value })}
+                  placeholder="--install"
+                  disabled={!settingsDraft.setupEnabled}
+                  rows={5}
+                />
+              </label>
+
+              <label className="toggleRow">
+                <input
+                  type="checkbox"
+                  checked={settingsDraft.autoStartDevServer}
+                  disabled={!settingsDraft.setupEnabled}
+                  onChange={(event) => setSettingsDraft({ ...settingsDraft, autoStartDevServer: event.target.checked })}
+                />
+                <span>Auto Start Dev Server</span>
+              </label>
+
+              <div className="sheetActions">
+                {isDesktop ? (
+                  <button
+                    className="secondaryButton"
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void addExistingWorktree()}
+                  >
+                    <FolderOpen size={17} />
+                    <span>Add Existing Worktree</span>
+                  </button>
+                ) : null}
+                <button className="secondaryButton" type="button" disabled={isBusy} onClick={() => setSettingsOpen(false)}>
+                  Cancel
+                </button>
+                <button className="primaryButton inlineButton" type="submit" disabled={isBusy}>
+                  <CheckCircle2 size={17} />
+                  <span>Save</span>
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
+  );
+}
+
+function SidebarContent(props: {
+  appState: AppStateResource;
+  selectedRepositoryId?: string;
+  selectedWorktreeId?: string;
+  isDesktop: boolean;
+  isBusy: boolean;
+  onAddRepository: () => void;
+  onSelectRepository: (repositoryId: string, worktreeId?: string) => void;
+}): JSX.Element {
+  return (
+    <div className="sidebarContent">
+      <div className="sidebarBrand">
+        <div className="brandMark" aria-hidden="true">
+          <GitBranch size={20} />
+        </div>
+        <div>
+          <h2>RepoBinder</h2>
+          <p>{props.appState.repositories.length} Repositories</p>
+        </div>
+      </div>
+
+      {props.isDesktop ? (
+        <button className="primaryButton" type="button" disabled={props.isBusy} onClick={props.onAddRepository}>
+          <Plus size={17} />
+          <span>Add Repository</span>
+        </button>
+      ) : null}
+
+      <nav className="repositoryNav" aria-label="Repository groups">
+        {props.appState.repositories.length > 0 ? (
+          props.appState.repositories.map((repository) => (
+            <RepositoryNavGroup
+              key={repository.repositoryId}
+              repository={repository}
+              selectedRepositoryId={props.selectedRepositoryId}
+              selectedWorktreeId={props.selectedWorktreeId}
+              disabled={props.isBusy}
+              onSelect={props.onSelectRepository}
+            />
+          ))
+        ) : (
+          <div className="sidebarEmpty">
+            <FolderOpen size={26} />
+            <span>No Repositories</span>
+          </div>
+        )}
+      </nav>
+    </div>
+  );
+}
+
+function RepositoryNavGroup(props: {
+  repository: RepositoryResource;
+  selectedRepositoryId?: string;
+  selectedWorktreeId?: string;
+  disabled: boolean;
+  onSelect: (repositoryId: string, worktreeId?: string) => void;
+}): JSX.Element {
+  const isSelectedRepository = props.repository.repositoryId === props.selectedRepositoryId;
+
+  return (
+    <div className="repositoryGroup">
+      <button
+        className={`repositoryButton ${isSelectedRepository ? "selected" : ""}`}
+        type="button"
+        disabled={props.disabled}
+        aria-pressed={isSelectedRepository}
+        onClick={() => props.onSelect(props.repository.repositoryId)}
+      >
+        <ChevronRight size={15} className={isSelectedRepository ? "chevronOpen" : undefined} />
+        <span>{props.repository.displayName}</span>
+        <small>{props.repository.worktrees.length}</small>
+      </button>
+
+      <div className="worktreeNavList">
+        {props.repository.worktrees.map((worktree) => {
+          const isSelectedWorktree = worktree.worktreeId === props.selectedWorktreeId;
+
+          return (
+            <button
+              className={`worktreeNavButton ${isSelectedWorktree ? "selected" : ""}`}
+              type="button"
+              key={worktree.worktreeId}
+              disabled={props.disabled}
+              aria-pressed={isSelectedWorktree}
+              onClick={() => props.onSelect(props.repository.repositoryId, worktree.worktreeId)}
+            >
+              <StatusDot status={worktree.availability === "available" ? "success" : "warning"} />
+              <span>{worktree.branch ?? "Detached HEAD"}</span>
+              <small>{worktree.type === "primary" ? "Primary" : "Linked"}</small>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RepositoryDashboard(props: {
+  repository: RepositoryResource;
+  selectedWorktree?: WorktreeResource;
+  selectedWorktreeId?: string;
+}): JSX.Element {
+  const linkedCount = props.repository.worktrees.filter((worktree) => worktree.type === "linked").length;
+
+  return (
+    <div className="repositoryDashboard">
+      <section className="metricsBand" aria-label="Repository summary">
+        <Metric label="Tracked Worktrees" value={props.repository.worktrees.length} />
+        <Metric label="Linked Worktrees" value={linkedCount} />
+        <Metric label="Selected Branch" value={props.selectedWorktree?.branch ?? "Detached"} />
+      </section>
+
+      <section className="worktreeSurface" aria-labelledby="worktrees-title">
+        <div className="surfaceHeader">
+          <div>
+            <p className="eyebrow">Tracked Worktrees</p>
+            <h2 id="worktrees-title">Worktrees</h2>
+          </div>
+          <span className="countBadge">{props.repository.worktrees.length}</span>
+        </div>
+
+        <div className="worktreeTable" role="table" aria-label="Tracked Worktrees">
+          <div className="worktreeTableHeader" role="row">
+            <span role="columnheader">Branch</span>
+            <span role="columnheader">Type</span>
+            <span role="columnheader">Worktree Path</span>
+            <span role="columnheader">Setup</span>
+            <span role="columnheader">Dev Server</span>
+          </div>
+
+          {props.repository.worktrees.map((worktree) => (
+            <WorktreeRow
+              key={worktree.worktreeId}
+              worktree={worktree}
+              selected={worktree.worktreeId === props.selectedWorktreeId}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function WorktreeRow(props: { worktree: WorktreeResource; selected: boolean }): JSX.Element {
+  return (
+    <article className={`worktreeRow ${props.selected ? "selected" : ""}`} role="row">
+      <div className="branchCell" role="cell">
+        <GitBranch size={16} />
+        <div>
+          <strong>{props.worktree.branch ?? "Detached HEAD"}</strong>
+          <small>{props.worktree.head ? props.worktree.head.slice(0, 7) : "No HEAD"}</small>
+        </div>
+      </div>
+      <div role="cell">
+        <StatusBadge tone={props.worktree.type === "primary" ? "neutral" : "info"} text={props.worktree.type === "primary" ? "Primary" : "Linked"} />
+      </div>
+      <code role="cell">{props.worktree.worktreePath}</code>
+      <div role="cell">
+        <StatusBadge tone={setupTone(props.worktree.setup.status)} text={formatSetupStatus(props.worktree.setup.status)} />
+      </div>
+      <div role="cell">
+        <StatusBadge tone={devServerTone(props.worktree.devServer?.status)} text={formatDevServer(props.worktree.devServer)} />
+      </div>
+    </article>
+  );
+}
+
+function ConnectionPill(props: { socketState: SocketState; remoteEnabled: boolean }): JSX.Element {
+  if (props.remoteEnabled) {
+    return <StatusPill icon={<Wifi size={15} />} tone="warning" label="Remote" />;
+  }
+
+  return props.socketState === "open" ? (
+    <StatusPill icon={<Server size={15} />} tone="success" label="Live" />
+  ) : (
+    <StatusPill icon={<WifiOff size={15} />} tone="danger" label="Offline" />
   );
 }
 
@@ -401,7 +790,15 @@ function StatusPill(props: { icon: JSX.Element; label: string; tone: "neutral" |
   );
 }
 
-function Metric(props: { label: string; value: number | string }) {
+function StatusBadge(props: { tone: "neutral" | "success" | "warning" | "danger" | "info"; text: string }): JSX.Element {
+  return <span className={`statusBadge ${props.tone}`}>{props.text}</span>;
+}
+
+function StatusDot(props: { status: "success" | "warning" | "danger" | "neutral" }): JSX.Element {
+  return <span className={`statusDot ${props.status}`} aria-hidden="true" />;
+}
+
+function Metric(props: { label: string; value: number | string }): JSX.Element {
   return (
     <div className="metric">
       <span>{props.label}</span>
@@ -410,28 +807,25 @@ function Metric(props: { label: string; value: number | string }) {
   );
 }
 
-function Feedback(props: { icon: JSX.Element; text: string; tone: "success" | "danger" }) {
+function BannerMessage(props: { icon: JSX.Element; text: string; tone: Banner["tone"] }): JSX.Element {
   return (
-    <div className={`feedback ${props.tone}`}>
+    <div className={`feedback ${props.tone}`} role={props.tone === "danger" ? "alert" : "status"}>
       {props.icon}
       <span>{props.text}</span>
     </div>
   );
 }
 
-async function submitInspect(
-  event: FormEvent<HTMLFormElement>,
-  inspect: (pathToInspect?: string) => Promise<void>,
-): Promise<void> {
-  event.preventDefault();
-  await inspect();
-}
-
-async function api<T>(pathName: string, init: RequestInit = {}): Promise<T> {
+async function api<T>(pathName: string, init: RequestInit = {}, desktopContext?: DesktopContext): Promise<T> {
   const response = await fetch(pathName, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(desktopContext?.desktopAuthToken
+        ? {
+            "X-RepoBinder-Desktop-Token": desktopContext.desktopAuthToken,
+          }
+        : {}),
       ...init.headers,
     },
   });
@@ -444,7 +838,89 @@ async function api<T>(pathName: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function safeParseSocketMessage(data: unknown): { type?: string; repositoryPath?: string } | undefined {
+function createSettingsDraft(settings: RepositorySettings): SettingsDraft {
+  return {
+    setupEnabled: settings.setup.enabled,
+    command: settings.setup.command ?? "",
+    defaultArgsText: settings.setup.defaultArgs.join("\n"),
+    autoStartDevServer: settings.setup.autoStartDevServer,
+  };
+}
+
+function parseArgsText(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function formatSetupStatus(status: SetupStatus): string {
+  switch (status) {
+    case "not_configured":
+      return "Not Configured";
+    case "pending":
+      return "Pending";
+    case "running":
+      return "Running";
+    case "success":
+      return "Success";
+    case "warning":
+      return "Warning";
+    case "failed":
+      return "Failed";
+    case "skipped":
+      return "Skipped";
+  }
+}
+
+function setupTone(status: SetupStatus): "neutral" | "success" | "warning" | "danger" | "info" {
+  switch (status) {
+    case "success":
+      return "success";
+    case "warning":
+      return "warning";
+    case "failed":
+      return "danger";
+    case "running":
+    case "pending":
+      return "info";
+    case "not_configured":
+    case "skipped":
+      return "neutral";
+  }
+}
+
+function formatDevServer(devServer: WorktreeResource["devServer"]): string {
+  if (!devServer) {
+    return "Unknown";
+  }
+
+  if (devServer.url) {
+    return devServer.url;
+  }
+
+  if (devServer.port) {
+    return `:${devServer.port}`;
+  }
+
+  return devServer.status;
+}
+
+function devServerTone(status: DevServerStatus | undefined): "neutral" | "success" | "warning" | "danger" | "info" {
+  switch (status) {
+    case "running":
+      return "success";
+    case "unreachable":
+      return "warning";
+    case "stopped":
+      return "neutral";
+    case "unknown":
+    case undefined:
+      return "neutral";
+  }
+}
+
+function safeParseSocketMessage(data: unknown): { type?: string } | undefined {
   if (typeof data !== "string") {
     return undefined;
   }
@@ -453,17 +929,13 @@ function safeParseSocketMessage(data: unknown): { type?: string; repositoryPath?
     const value = JSON.parse(data) as unknown;
 
     if (typeof value === "object" && value !== null) {
-      return value as { type?: string; repositoryPath?: string };
+      return value as { type?: string };
     }
   } catch {
     return undefined;
   }
 
   return undefined;
-}
-
-function shortSha(head: string | undefined): string {
-  return head ? head.slice(0, 7) : "unknown";
 }
 
 function toErrorMessage(error: unknown): string {
