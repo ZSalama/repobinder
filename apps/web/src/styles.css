@@ -600,7 +600,7 @@ button:focus-visible {
 .worktreeTableHeader,
 .worktreeRow {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 112px minmax(220px, 1.3fr) 136px 146px 154px;
+  grid-template-columns: minmax(190px, 1.2fr) 108px 136px minmax(220px, 1fr) 88px;
   gap: 12px;
   align-items: center;
 }
@@ -678,6 +678,55 @@ button:focus-visible {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.devServerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgb(255 255 255 / 5%);
+  font-size: 0.75rem;
+  font-weight: 780;
+}
+
+.devServerButton:hover:not(:disabled) {
+  border-color: rgb(122 215 181 / 26%);
+  background: rgb(122 215 181 / 10%);
+}
+
+.devServerButton svg {
+  flex: 0 0 auto;
+}
+
+.devServerButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devServerButton.success {
+  color: var(--green);
+}
+
+.devServerButton.warning {
+  color: var(--amber);
+}
+
+.devServerButton.danger {
+  color: var(--red);
+}
+
+.devServerButton.info {
+  color: var(--blue);
 }
 
 .processMeta {

@@ -35,7 +35,6 @@ export function RepositoryDashboard(props: {
           <div className="worktreeTableHeader" role="row">
             <span role="columnheader">Branch</span>
             <span role="columnheader">Type</span>
-            <span role="columnheader">Worktree Path</span>
             <span role="columnheader">Setup</span>
             <span role="columnheader">Dev Server</span>
             <span role="columnheader">Actions</span>
@@ -70,6 +69,8 @@ function WorktreeRow(props: {
   const runningProcesses = worktree.trackedProcesses.filter((process) => process.status === "running");
   const canOpenDev = isOpenDevActionable(worktree);
   const worktreeWarnings = getWorktreeWarnings(worktree);
+  const devServerLabel = formatDevServer(worktree.devServer);
+  const devServerStatusTone = devServerTone(worktree.devServer?.status);
 
   const branchLabel = worktree.branch ?? "Detached HEAD";
   const rowLabel = `${props.selected ? "Selected " : ""}${worktree.type === "primary" ? "Primary" : "Linked"} Worktree, ${branchLabel}`;
@@ -94,15 +95,25 @@ function WorktreeRow(props: {
           text={worktree.type === "primary" ? "Primary" : "Linked"}
         />
       </div>
-      <div className="worktreeCell pathCell" role="cell" data-label="Worktree Path">
-        <code>{worktree.worktreePath}</code>
-      </div>
       <div className="worktreeCell" role="cell" data-label="Setup">
         <StatusBadge tone={setupTone(worktree.setup.status)} text={formatSetupStatus(worktree.setup.status)} />
       </div>
       <div className="worktreeCell" role="cell" data-label="Dev Server">
         <div className="devServerCell">
-          <StatusBadge tone={devServerTone(worktree.devServer?.status)} text={formatDevServer(worktree.devServer)} />
+          {canOpenDev ? (
+            <button
+              className={`devServerButton ${devServerStatusTone}`}
+              type="button"
+              title={`Open ${devServerLabel}`}
+              aria-label={`Open Dev Server ${devServerLabel} for ${worktree.branch ?? "Worktree"}`}
+              onClick={() => props.onOpenDev(worktree.worktreeId)}
+            >
+              <ExternalLink size={14} aria-hidden="true" />
+              <span>{devServerLabel}</span>
+            </button>
+          ) : (
+            <StatusBadge tone={devServerStatusTone} text={devServerLabel} />
+          )}
           {runningProcesses.length > 0 ? (
             <span className="processMeta">
               {runningProcesses.length} process{runningProcesses.length === 1 ? "" : "es"}
@@ -114,17 +125,6 @@ function WorktreeRow(props: {
       </div>
       <div className="worktreeCell actionsCell" role="cell" data-label="Actions">
         <div className="rowActions">
-          {canOpenDev ? (
-            <button
-              className="secondaryButton"
-              type="button"
-              aria-label={`Open Dev Server for ${worktree.branch ?? "Worktree"}`}
-              onClick={() => props.onOpenDev(worktree.worktreeId)}
-            >
-              <ExternalLink size={15} aria-hidden="true" />
-              <span>Open Dev</span>
-            </button>
-          ) : null}
           {worktree.type === "linked" ? (
             <button
               className="iconButton dangerButton"

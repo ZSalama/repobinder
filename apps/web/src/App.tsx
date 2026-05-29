@@ -78,6 +78,7 @@ export function App(): JSX.Element {
   const pollRef = useRef<{ busy: boolean; repositoryId?: string }>({ busy: false });
   const seenOperationIdsRef = useRef<Set<string>>(new Set());
   const operationsInitializedRef = useRef(false);
+  const settingsDraftRepositoryIdRef = useRef<string | undefined>();
   pollRef.current = { busy: isBusy, repositoryId: selectedRepository?.repositoryId };
 
   useEffect(() => {
@@ -195,10 +196,17 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!settingsOpen || !selectedRepository) {
+    if (!settingsOpen) {
+      settingsDraftRepositoryIdRef.current = undefined;
+      setSettingsDraft(undefined);
       return;
     }
 
+    if (!selectedRepository || settingsDraftRepositoryIdRef.current === selectedRepository.repositoryId) {
+      return;
+    }
+
+    settingsDraftRepositoryIdRef.current = selectedRepository.repositoryId;
     setSettingsDraft(createSettingsDraft(selectedRepository.settings));
   }, [selectedRepository, settingsOpen]);
 
@@ -397,6 +405,7 @@ export function App(): JSX.Element {
       return;
     }
 
+    settingsDraftRepositoryIdRef.current = selectedRepository.repositoryId;
     setSettingsDraft(createSettingsDraft(selectedRepository.settings));
     setSettingsOpen(true);
   }

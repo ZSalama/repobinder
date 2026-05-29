@@ -478,7 +478,17 @@ linkedWorktreesRouter.post("/api/repositories/:repositoryId/worktrees", async (r
           ];
 
           // The setup script runs inside the new Linked Worktree.
-          setup = await runSetupScript({ command: settings.setup.command, args, cwd: row.worktreePath });
+          setup = await runSetupScript({
+            command: settings.setup.command,
+            args,
+            cwd: row.worktreePath,
+            context: {
+              primaryWorktreePath: repository.primaryWorktreePath,
+              linkedWorktreePath: row.worktreePath,
+              branch: row.branchName,
+              baseBranch,
+            },
+          });
 
           if (setup.devServer) {
             devServerStatus = await probeDevServerStatus(setup.devServer);

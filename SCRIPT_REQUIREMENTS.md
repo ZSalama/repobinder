@@ -84,11 +84,9 @@ Runtime details:
 
 - Current working directory is the new Linked Worktree path.
 - The script runs after `git worktree add` succeeds.
-- The script does not receive the Branch name as a required positional argument.
-- The script does not receive the Worktree Path as a required positional argument.
-- If the script needs the Branch, it should discover it from Git, for example `git branch --show-current`.
-- If the script needs the Worktree Path, it should use `pwd -P` or `git rev-parse --show-toplevel`.
-- If the script needs the Primary Worktree path or an environment source path, the project must provide that explicitly through Repository default args, run args, a project config file, or a safe discovery strategy.
+- RepoBinder provides stable context environment variables for the Primary Worktree, Linked Worktree, Branch, and Base Branch.
+- The script does not receive the Branch name or Worktree Path as required positional arguments.
+- The script may still discover Git context itself, for example with `git branch --show-current`, `pwd -P`, or `git rev-parse --show-toplevel`.
 - Standard input is ignored.
 - Standard output and standard error are captured.
 - Setup has a 10 minute timeout.
@@ -98,7 +96,14 @@ Runtime details:
 - Setup scripts run sequentially within a New Worktree batch.
 - RepoBinder allows only one global mutating operation at a time.
 
-The setup process inherits the backend process environment, but RepoBinder-specific environment variables are not a stable script API. Do not rely on them.
+The setup process inherits the backend process environment and receives these stable RepoBinder context variables:
+
+- `REPOBINDER_PRIMARY_WORKTREE_PATH`: absolute path to the Repository's Primary Worktree.
+- `REPOBINDER_LINKED_WORKTREE_PATH`: absolute path to the newly created Linked Worktree where setup is running.
+- `REPOBINDER_BRANCH`: Branch name created for the Linked Worktree.
+- `REPOBINDER_BASE_BRANCH`: Branch name used as the Git base for `git worktree add`.
+
+These variables are for paths and Git context only. RepoBinder does not pass secret values through environment variables.
 
 ## Required Script Behavior
 
@@ -151,6 +156,7 @@ Many projects need ignored local files such as `.env`, `.env.local`, or app-spec
 
 A generated setup script should define an explicit project-specific strategy for these files. Acceptable strategies include:
 
+- Copy from the Primary Worktree using `REPOBINDER_PRIMARY_WORKTREE_PATH`.
 - Copy from a user-provided source path passed through Repository default args.
 - Copy from a stable local template path inside the repository.
 - Create a sample local file from committed example files such as `.env.example`.
@@ -164,6 +170,7 @@ Requirements:
 - Do not include secret values in metadata JSON.
 - Do not overwrite an existing local env file unless the project explicitly requires that behavior.
 - Prefer creating missing files over replacing user-edited files.
+- Prefer copying whole local config files over passing individual secret values as args or metadata.
 
 ## Auto Start Dev Server
 
@@ -390,7 +397,10 @@ fi
 
 warnings=()
 
-if [[ ! -f .env.local && -f .env.example ]]; then
+if [[ ! -f .env.local && -n "${REPOBINDER_PRIMARY_WORKTREE_PATH:-}" && -f "$REPOBINDER_PRIMARY_WORKTREE_PATH/.env.local" ]]; then
+  install -m 600 "$REPOBINDER_PRIMARY_WORKTREE_PATH/.env.local" .env.local
+  warnings+=("Copied .env.local from the Primary Worktree")
+elif [[ ! -f .env.local && -f .env.example ]]; then
   cp .env.example .env.local
   warnings+=("Created .env.local from .env.example; fill in local secrets before running services")
 fi
@@ -521,6 +531,8 @@ When asking an LLM to generate a Worktree Setup Script for a project, require it
 - [ ] The script is repository-owned and committed to the project.
 - [ ] The configured command is a repo-relative path such as `scripts/repobinder-setup`.
 - [ ] The script assumes `cwd` is the new Linked Worktree.
+- [ ] The script uses `REPOBINDER_PRIMARY_WORKTREE_PATH` when it needs ignored local files from the Primary Worktree.
+- [ ] The script treats `REPOBINDER_LINKED_WORKTREE_PATH`, `REPOBINDER_BRANCH`, and `REPOBINDER_BASE_BRANCH` as context, not as secrets.
 - [ ] The script does not create, delete, fetch, pull, switch, merge, or rebase Git worktrees or Branches.
 - [ ] The script stays within the Worktree Setup Script responsibility boundary.
 - [ ] The script uses stderr for logs.

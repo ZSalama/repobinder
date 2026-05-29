@@ -15,6 +15,14 @@ export type SetupRunInput = {
   command: string;
   args: string[];
   cwd: string;
+  context: SetupRunContext;
+};
+
+export type SetupRunContext = {
+  primaryWorktreePath: string;
+  linkedWorktreePath: string;
+  branch: string;
+  baseBranch: string;
 };
 
 export type TrackedProcessInput = {
@@ -76,6 +84,7 @@ export function runSetupScript(input: SetupRunInput): Promise<SetupRunResult> {
   return new Promise((resolve) => {
     const child = spawn(file, input.args, {
       cwd: input.cwd,
+      env: buildSetupEnvironment(input.context),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -311,4 +320,14 @@ function resolveCommand(command: string, cwd: string): string {
 
 function isPathLikeCommand(command: string): boolean {
   return path.isAbsolute(command) || command.startsWith(".") || command.includes("/") || command.includes("\\");
+}
+
+function buildSetupEnvironment(context: SetupRunContext): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    REPOBINDER_PRIMARY_WORKTREE_PATH: context.primaryWorktreePath,
+    REPOBINDER_LINKED_WORKTREE_PATH: context.linkedWorktreePath,
+    REPOBINDER_BRANCH: context.branch,
+    REPOBINDER_BASE_BRANCH: context.baseBranch,
+  };
 }
