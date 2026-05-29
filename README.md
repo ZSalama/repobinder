@@ -26,13 +26,13 @@ To bind the backend to all interfaces:
 pnpm run dev:remote
 ```
 
-The backend defaults to port `3773`. Electron will scan upward if that port is unavailable.
+The backend defaults to port `3774`. Electron will scan upward if that port is unavailable.
 
 ## Server Only
 
 ```sh
 pnpm run build
-HOST=127.0.0.1 PORT=3773 pnpm run start
+HOST=127.0.0.1 PORT=3774 pnpm run start
 ```
 
-Open `http://127.0.0.1:3773` in a browser.
+Open `http://127.0.0.1:3774` in a browser.

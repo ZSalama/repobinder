@@ -69,10 +69,11 @@ function RepositoryNavGroup(props: {
         className={`repositoryButton ${isSelectedRepository ? "selected" : ""}`}
         type="button"
         disabled={props.disabled}
-        aria-pressed={isSelectedRepository}
+        aria-current={isSelectedRepository ? "page" : undefined}
+        aria-label={`Select Repository ${props.repository.displayName}`}
         onClick={() => props.onSelect(props.repository.repositoryId)}
       >
-        <ChevronRight size={15} className={isSelectedRepository ? "chevronOpen" : undefined} />
+        <ChevronRight size={15} className={isSelectedRepository ? "chevronOpen" : undefined} aria-hidden="true" />
         <span>{props.repository.displayName}</span>
         <small>{props.repository.worktrees.length}</small>
       </button>
@@ -87,7 +88,10 @@ function RepositoryNavGroup(props: {
               type="button"
               key={worktree.worktreeId}
               disabled={props.disabled}
-              aria-pressed={isSelectedWorktree}
+              aria-current={isSelectedWorktree ? "true" : undefined}
+              aria-label={`Select ${worktree.type === "primary" ? "Primary" : "Linked"} Worktree ${
+                worktree.branch ?? "Detached HEAD"
+              }`}
               onClick={() => props.onSelect(props.repository.repositoryId, worktree.worktreeId)}
             >
               <StatusDot status={worktree.availability === "available" ? "success" : "warning"} />

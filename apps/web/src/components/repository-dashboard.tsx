@@ -41,16 +41,18 @@ export function RepositoryDashboard(props: {
             <span role="columnheader">Actions</span>
           </div>
 
-          {props.repository.worktrees.map((worktree) => (
-            <WorktreeRow
-              key={worktree.worktreeId}
-              worktree={worktree}
-              selected={worktree.worktreeId === props.selectedWorktreeId}
-              isBusy={props.isBusy}
-              onOpenDev={props.onOpenDev}
-              onRequestDelete={props.onRequestDelete}
-            />
-          ))}
+          <div className="worktreeTableBody" role="rowgroup">
+            {props.repository.worktrees.map((worktree) => (
+              <WorktreeRow
+                key={worktree.worktreeId}
+                worktree={worktree}
+                selected={worktree.worktreeId === props.selectedWorktreeId}
+                isBusy={props.isBusy}
+                onOpenDev={props.onOpenDev}
+                onRequestDelete={props.onRequestDelete}
+              />
+            ))}
+          </div>
         </div>
       </section>
     </div>
@@ -69,60 +71,73 @@ function WorktreeRow(props: {
   const canOpenDev = isOpenDevActionable(worktree);
   const worktreeWarnings = getWorktreeWarnings(worktree);
 
+  const branchLabel = worktree.branch ?? "Detached HEAD";
+  const rowLabel = `${props.selected ? "Selected " : ""}${worktree.type === "primary" ? "Primary" : "Linked"} Worktree, ${branchLabel}`;
+
   return (
-    <article className={`worktreeRow ${props.selected ? "selected" : ""}`} role="row">
-      <div className="branchCell" role="cell">
-        <GitBranch size={16} />
-        <div>
-          <strong>{worktree.branch ?? "Detached HEAD"}</strong>
-          <small>{worktree.head ? worktree.head.slice(0, 7) : "No HEAD"}</small>
-          {worktreeWarnings.length > 0 ? <small className="worktreeWarning">{worktreeWarnings.join(" · ")}</small> : null}
+    <article className={`worktreeRow ${props.selected ? "selected" : ""}`} role="row" aria-label={rowLabel}>
+      <div className="worktreeCell branchCell" role="cell" data-label="Branch">
+        <div className="branchIdentity">
+          <GitBranch size={16} aria-hidden="true" />
+          <div>
+            <strong>{branchLabel}</strong>
+            <small>{worktree.head ? worktree.head.slice(0, 7) : "No HEAD"}</small>
+            {worktreeWarnings.length > 0 ? (
+              <small className="worktreeWarning">{worktreeWarnings.join(" · ")}</small>
+            ) : null}
+          </div>
         </div>
       </div>
-      <div role="cell">
+      <div className="worktreeCell" role="cell" data-label="Type">
         <StatusBadge
           tone={worktree.type === "primary" ? "neutral" : "info"}
           text={worktree.type === "primary" ? "Primary" : "Linked"}
         />
       </div>
-      <code role="cell">{worktree.worktreePath}</code>
-      <div role="cell">
+      <div className="worktreeCell pathCell" role="cell" data-label="Worktree Path">
+        <code>{worktree.worktreePath}</code>
+      </div>
+      <div className="worktreeCell" role="cell" data-label="Setup">
         <StatusBadge tone={setupTone(worktree.setup.status)} text={formatSetupStatus(worktree.setup.status)} />
       </div>
-      <div className="devServerCell" role="cell">
-        <StatusBadge tone={devServerTone(worktree.devServer?.status)} text={formatDevServer(worktree.devServer)} />
-        {runningProcesses.length > 0 ? (
-          <span className="processMeta">
-            {runningProcesses.length} process{runningProcesses.length === 1 ? "" : "es"}
-            {worktree.devServer?.pid ? ` · pid ${worktree.devServer.pid}` : ""}
-            {worktree.devServer?.port ? ` · :${worktree.devServer.port}` : ""}
-          </span>
-        ) : null}
+      <div className="worktreeCell" role="cell" data-label="Dev Server">
+        <div className="devServerCell">
+          <StatusBadge tone={devServerTone(worktree.devServer?.status)} text={formatDevServer(worktree.devServer)} />
+          {runningProcesses.length > 0 ? (
+            <span className="processMeta">
+              {runningProcesses.length} process{runningProcesses.length === 1 ? "" : "es"}
+              {worktree.devServer?.pid ? ` · pid ${worktree.devServer.pid}` : ""}
+              {worktree.devServer?.port ? ` · :${worktree.devServer.port}` : ""}
+            </span>
+          ) : null}
+        </div>
       </div>
-      <div className="rowActions" role="cell">
-        {canOpenDev ? (
-          <button
-            className="secondaryButton"
-            type="button"
-            aria-label={`Open Dev Server for ${worktree.branch ?? "Worktree"}`}
-            onClick={() => props.onOpenDev(worktree.worktreeId)}
-          >
-            <ExternalLink size={15} />
-            <span>Open Dev</span>
-          </button>
-        ) : null}
-        {worktree.type === "linked" ? (
-          <button
-            className="iconButton dangerButton"
-            type="button"
-            title="Delete Linked Worktree"
-            aria-label={`Delete Linked Worktree for ${worktree.branch ?? "detached Worktree"}`}
-            disabled={props.isBusy}
-            onClick={() => props.onRequestDelete(worktree)}
-          >
-            <Trash2 size={15} />
-          </button>
-        ) : null}
+      <div className="worktreeCell actionsCell" role="cell" data-label="Actions">
+        <div className="rowActions">
+          {canOpenDev ? (
+            <button
+              className="secondaryButton"
+              type="button"
+              aria-label={`Open Dev Server for ${worktree.branch ?? "Worktree"}`}
+              onClick={() => props.onOpenDev(worktree.worktreeId)}
+            >
+              <ExternalLink size={15} aria-hidden="true" />
+              <span>Open Dev</span>
+            </button>
+          ) : null}
+          {worktree.type === "linked" ? (
+            <button
+              className="iconButton dangerButton"
+              type="button"
+              title="Delete Linked Worktree"
+              aria-label={`Delete Linked Worktree for ${worktree.branch ?? "detached Worktree"}`}
+              disabled={props.isBusy}
+              onClick={() => props.onRequestDelete(worktree)}
+            >
+              <Trash2 size={15} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
       </div>
     </article>
   );

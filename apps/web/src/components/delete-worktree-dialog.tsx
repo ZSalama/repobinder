@@ -1,6 +1,7 @@
 import { AlertTriangle, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import { WorktreeResource } from "@/types";
 
 export function DeleteWorktreeDialog(props: {
@@ -13,19 +14,23 @@ export function DeleteWorktreeDialog(props: {
   const defaultDeleteBranch = props.worktree.createdByRepoBinder && branchDeleteAvailable;
   const [deleteBranch, setDeleteBranch] = useState(defaultDeleteBranch);
   const runningProcesses = props.worktree.trackedProcesses.filter((process) => process.status === "running").length;
+  const { containerRef, onKeyDown } = useModalFocus<HTMLElement>(props.onClose, { closeOnEscape: !props.isBusy });
 
   useEffect(() => {
     setDeleteBranch(defaultDeleteBranch);
   }, [defaultDeleteBranch, props.worktree.worktreeId]);
 
   return (
-    <div className="dialogLayer" role="presentation" onMouseDown={props.onClose}>
+    <div className="dialogLayer" role="presentation" onMouseDown={props.isBusy ? undefined : props.onClose}>
       <section
+        ref={containerRef}
         className="confirmDialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="delete-worktree-title"
         aria-describedby="delete-worktree-description"
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialogHeader">
@@ -37,7 +42,7 @@ export function DeleteWorktreeDialog(props: {
             <h2 id="delete-worktree-title">Delete Worktree</h2>
           </div>
           <button className="iconButton" type="button" aria-label="Close" disabled={props.isBusy} onClick={props.onClose}>
-            <X size={18} />
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
 

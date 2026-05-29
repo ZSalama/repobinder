@@ -1,7 +1,6 @@
 import { TrackedProcessRole } from "../store";
 
-// Worktree Setup Script metadata is a v1 schema keyed on `status`. The older
-// Codex-oriented `ok` / `agentRunnable` fields are intentionally not supported.
+// Worktree Setup Script metadata is a v1 schema keyed on `status`.
 export type SetupMetadataStatus = "success" | "warning" | "failed";
 
 export type SetupProcessMetadata = {

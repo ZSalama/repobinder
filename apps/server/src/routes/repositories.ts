@@ -192,23 +192,3 @@ repositoriesRouter.get("/api/repositories/:repositoryId/worktrees", async (reque
     next(error);
   }
 });
-
-repositoriesRouter.post("/api/repositories/inspect", async (request, response, next) => {
-  const requestedRepositoryPath = readOptionalString(request.body, "repositoryPath");
-
-  try {
-    response.json(await inspectRepository(readRequiredString(request.body, "repositoryPath")));
-  } catch (error) {
-    await recordOperationSafely({
-      type: "repository.inspect",
-      status: "failed",
-      severity: "error",
-      summary: "Repository inspection failed",
-      details: compactJsonObject({
-        repositoryPath: requestedRepositoryPath,
-        error: toApiError(error).message,
-      }),
-    });
-    next(error);
-  }
-});

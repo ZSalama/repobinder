@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-export const DEFAULT_PORT = 3773;
+export const DEFAULT_PORT = 3774;
 export const DEFAULT_HOST = "127.0.0.1";
 export const MAX_GIT_OUTPUT_BYTES = 10 * 1024 * 1024;
 

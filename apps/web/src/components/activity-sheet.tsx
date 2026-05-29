@@ -1,16 +1,22 @@
 import { AlertTriangle, CheckCircle2, History, Info, X } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-display";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import { OperationRecord, OperationSeverity } from "@/types";
 
 export function ActivitySheet(props: { operations: OperationRecord[]; onClose: () => void }): JSX.Element {
+  const { containerRef, onKeyDown } = useModalFocus<HTMLElement>(props.onClose);
+
   return (
     <div className="sheetLayer" role="presentation" onMouseDown={props.onClose}>
       <section
+        ref={containerRef}
         className="activitySheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="activity-title"
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="sheetHeader">

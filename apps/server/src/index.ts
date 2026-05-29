@@ -12,7 +12,6 @@ import { serverInfoRouter } from "./routes/server-info";
 import { settingsRouter } from "./routes/settings";
 import { stateRouter } from "./routes/state";
 import { worktreeStatusRouter } from "./routes/worktree-status";
-import { worktreesRouter } from "./routes/worktrees";
 import { attachSockets, sockets } from "./sockets";
 
 const app = express();
@@ -27,7 +26,6 @@ app.use(repositoriesRouter);
 app.use(settingsRouter);
 app.use(linkedWorktreesRouter);
 app.use(worktreeStatusRouter);
-app.use(worktreesRouter);
 app.use(activityRouter);
 
 app.use(express.static(webDist));

@@ -1,6 +1,7 @@
 import { CheckCircle2, FolderOpen, X } from "lucide-react";
 import { Dispatch, FormEvent, SetStateAction } from "react";
 
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import { SettingsDraft } from "@/types";
 
 export function SettingsSheet(props: {
@@ -13,14 +14,18 @@ export function SettingsSheet(props: {
   onAddExistingWorktree: () => void;
 }): JSX.Element {
   const { settingsDraft, setSettingsDraft } = props;
+  const { containerRef, onKeyDown } = useModalFocus<HTMLElement>(props.onClose);
 
   return (
     <div className="sheetLayer" role="presentation" onMouseDown={props.onClose}>
       <section
+        ref={containerRef}
         className="settingsSheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="repository-settings-title"
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="sheetHeader">

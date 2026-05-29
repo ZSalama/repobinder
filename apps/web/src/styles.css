@@ -395,9 +395,12 @@ button:focus-visible {
 }
 
 .primaryButton {
-  width: 100%;
   color: var(--primary-foreground);
   background: var(--green);
+}
+
+.sidebarContent > .primaryButton {
+  width: 100%;
 }
 
 .primaryButton:hover:not(:disabled) {
@@ -589,6 +592,11 @@ button:focus-visible {
   min-width: 0;
 }
 
+.worktreeTableBody {
+  display: grid;
+  min-width: 0;
+}
+
 .worktreeTableHeader,
 .worktreeRow {
   display: grid;
@@ -621,22 +629,28 @@ button:focus-visible {
   background: rgb(122 215 181 / 8%);
 }
 
-.branchCell {
+.worktreeCell {
+  min-width: 0;
+}
+
+.branchIdentity {
+  display: flex;
+  align-items: center;
   gap: 10px;
   min-width: 0;
 }
 
-.branchCell > svg {
+.branchIdentity > svg {
   flex: 0 0 auto;
   color: var(--green);
 }
 
-.branchCell div {
+.branchIdentity div {
   min-width: 0;
 }
 
-.branchCell strong,
-.branchCell small {
+.branchIdentity strong,
+.branchIdentity small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1226,12 +1240,34 @@ button:focus-visible {
     padding: 14px;
   }
 
-  .worktreeRow > * {
-    min-width: 0;
+  .worktreeCell {
+    display: grid;
+    grid-template-columns: minmax(86px, 0.34fr) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    width: 100%;
+  }
+
+  .worktreeCell::before {
+    content: attr(data-label);
+    padding-top: 4px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 820;
+    line-height: 1.2;
+    text-transform: uppercase;
   }
 
   .worktreeRow code {
     display: block;
+  }
+
+  .branchIdentity {
+    align-items: flex-start;
+  }
+
+  .rowActions {
+    justify-content: flex-start;
   }
 }
 
@@ -1253,5 +1289,21 @@ button:focus-visible {
 
   .dialogActions {
     flex-direction: column;
+  }
+
+  .headerActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .headerActions .secondaryButton,
+  .headerActions .primaryButton,
+  .headerActions .iconButton {
+    width: 100%;
+  }
+
+  .rowActions .secondaryButton {
+    width: 100%;
   }
 }

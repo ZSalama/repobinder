@@ -8,7 +8,7 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 
-const DEFAULT_PORT = 3773;
+const DEFAULT_PORT = 3774;
 const LOCALHOST = "127.0.0.1";
 const REMOTE_HOST = "0.0.0.0";
 const READY_TIMEOUT_MS = 15_000;
