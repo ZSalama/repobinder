@@ -3,7 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.1.2",
-  "description": "A desktop-first tool for creating and deleting Git worktrees.",
+  "description": "A desktop-first Git worktree manager for local development.",
+  "license": "MIT",
+  "author": "Zack Salama",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZSalama/repobinder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZSalama/repobinder/issues"
+  },
+  "homepage": "https://github.com/ZSalama/repobinder#readme",
+  "keywords": [
+    "git",
+    "worktree",
+    "electron",
+    "react",
+    "developer-tools",
+    "local-first"
+  ],
   "main": "dist/desktop/main.js",
   "scripts": {
     "build": "pnpm run build:web && pnpm run build:server && pnpm run build:desktop",
@@ -47,6 +65,7 @@
     "vite": "^6.0.3"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "pnpm": ">=11"
   }
 }

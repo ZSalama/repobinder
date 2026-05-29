@@ -1,7 +1,21 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 dist-web/
+
+# Local environment
 .env
 .env.*
+!.env.example
+
+# Logs and local OS files
 *.log
 .DS_Store
+
+# Local agent/workflow state
+.scratch/
+.agents/
+.claude/
+skills-lock.json
