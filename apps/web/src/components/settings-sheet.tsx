@@ -48,6 +48,7 @@ export function SettingsSheet(props: {
                   ...settingsDraft,
                   setupEnabled: event.target.checked,
                   autoStartDevServer: event.target.checked ? settingsDraft.autoStartDevServer : false,
+                  tailscaleRouting: event.target.checked ? settingsDraft.tailscaleRouting : false,
                 })
               }
             />
@@ -80,9 +81,25 @@ export function SettingsSheet(props: {
               type="checkbox"
               checked={settingsDraft.autoStartDevServer}
               disabled={!settingsDraft.setupEnabled}
-              onChange={(event) => setSettingsDraft({ ...settingsDraft, autoStartDevServer: event.target.checked })}
+              onChange={(event) =>
+                setSettingsDraft({
+                  ...settingsDraft,
+                  autoStartDevServer: event.target.checked,
+                  tailscaleRouting: event.target.checked ? settingsDraft.tailscaleRouting : false,
+                })
+              }
             />
             <span>Auto Start Dev Server</span>
+          </label>
+
+          <label className="toggleRow">
+            <input
+              type="checkbox"
+              checked={settingsDraft.tailscaleRouting}
+              disabled={!settingsDraft.setupEnabled || !settingsDraft.autoStartDevServer}
+              onChange={(event) => setSettingsDraft({ ...settingsDraft, tailscaleRouting: event.target.checked })}
+            />
+            <span>Tailscale Routing</span>
           </label>
 
           <div className="sheetActions">

@@ -1,4 +1,4 @@
-import { ExternalLink, GitBranch, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, GitBranch, Trash2 } from "lucide-react";
 
 import { Metric, StatusBadge } from "@/components/status-display";
 import { devServerTone, formatDevServer, formatSetupStatus, setupTone } from "@/lib/format";
@@ -9,6 +9,7 @@ export function RepositoryDashboard(props: {
   selectedWorktree?: WorktreeResource;
   selectedWorktreeId?: string;
   isBusy: boolean;
+  devServerAction: "copy" | "open";
   onOpenDev: (worktreeId: string) => void;
   onRequestDelete: (worktree: WorktreeResource) => void;
 }): JSX.Element {
@@ -47,6 +48,7 @@ export function RepositoryDashboard(props: {
                 worktree={worktree}
                 selected={worktree.worktreeId === props.selectedWorktreeId}
                 isBusy={props.isBusy}
+                devServerAction={props.devServerAction}
                 onOpenDev={props.onOpenDev}
                 onRequestDelete={props.onRequestDelete}
               />
@@ -62,6 +64,7 @@ function WorktreeRow(props: {
   worktree: WorktreeResource;
   selected: boolean;
   isBusy: boolean;
+  devServerAction: "copy" | "open";
   onOpenDev: (worktreeId: string) => void;
   onRequestDelete: (worktree: WorktreeResource) => void;
 }): JSX.Element {
@@ -74,6 +77,8 @@ function WorktreeRow(props: {
 
   const branchLabel = worktree.branch ?? "Detached HEAD";
   const rowLabel = `${props.selected ? "Selected " : ""}${worktree.type === "primary" ? "Primary" : "Linked"} Worktree, ${branchLabel}`;
+  const devServerVerb = props.devServerAction === "copy" ? "Copy" : "Open";
+  const DevServerIcon = props.devServerAction === "copy" ? Copy : ExternalLink;
 
   return (
     <article className={`worktreeRow ${props.selected ? "selected" : ""}`} role="row" aria-label={rowLabel}>
@@ -104,11 +109,11 @@ function WorktreeRow(props: {
             <button
               className={`devServerButton ${devServerStatusTone}`}
               type="button"
-              title={`Open ${devServerLabel}`}
-              aria-label={`Open Dev Server ${devServerLabel} for ${worktree.branch ?? "Worktree"}`}
+              title={`${devServerVerb} ${devServerLabel}`}
+              aria-label={`${devServerVerb} Dev Server URL ${devServerLabel} for ${worktree.branch ?? "Worktree"}`}
               onClick={() => props.onOpenDev(worktree.worktreeId)}
             >
-              <ExternalLink size={14} aria-hidden="true" />
+              <DevServerIcon size={14} aria-hidden="true" />
               <span>{devServerLabel}</span>
             </button>
           ) : (

@@ -77,6 +77,7 @@ settingsRouter.patch("/api/repositories/:repositoryId/settings", async (request,
           details: compactJsonObject({
             setupEnabled: settings.setup.enabled,
             autoStartDevServer: settings.setup.autoStartDevServer,
+            tailscaleRouting: settings.setup.tailscaleRouting,
           }),
         });
 

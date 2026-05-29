@@ -146,6 +146,7 @@ export async function readRepositorySettingsBody(
   const command = readOptionalString(body.setup, "command");
   const defaultArgs = body.setup.defaultArgs === undefined ? [] : readStringArray(body.setup.defaultArgs, "defaultArgs");
   const autoStartDevServer = enabled && Boolean(body.setup.autoStartDevServer);
+  const tailscaleRouting = autoStartDevServer && Boolean(body.setup.tailscaleRouting);
 
   if (enabled && !command) {
     throw new ApiError(400, "Setup command is required when setup is enabled");
@@ -166,6 +167,7 @@ export async function readRepositorySettingsBody(
       command,
       defaultArgs,
       autoStartDevServer,
+      tailscaleRouting,
     },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -202,4 +204,3 @@ async function validateSetupCommand(command: string, primaryWorktreePath: string
 function isPathLikeCommand(command: string): boolean {
   return path.isAbsolute(command) || command.startsWith(".") || command.includes("/") || command.includes("\\");
 }
-

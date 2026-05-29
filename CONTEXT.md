@@ -76,6 +76,10 @@ _Avoid_: Workspace script, creation script
 A local development process associated with a Worktree. RepoBinder may track its process id, port, and URL when a Worktree Setup Script reports them.
 _Avoid_: Dev environment when referring to the running process
 
+**Tailscale Routing**:
+A Repository Setting that asks Auto Start Dev Server to make the Dev Server reachable from devices already connected to the same tailnet as the RepoBinder machine. RepoBinder does not configure Tailscale itself.
+_Avoid_: Remote mode when referring only to Dev Server reachability
+
 **Tracked Process**:
 A local process id reported by a Worktree Setup Script and stored by RepoBinder for status checks and cleanup. A Worktree may have multiple Tracked Processes, with at most one primary Dev Server.
 _Avoid_: Process when referring to RepoBinder-managed cleanup state

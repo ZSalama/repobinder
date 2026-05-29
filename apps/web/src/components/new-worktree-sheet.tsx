@@ -80,7 +80,11 @@ export function NewWorktreeSheet(props: {
             {props.context?.autoStartDevServer ? (
               <BannerMessage
                 tone="info"
-                text="Auto Start Dev Server is on. RepoBinder will reserve a port per Worktree and pass --port to the setup script."
+                text={
+                  props.context.tailscaleRouting
+                    ? "Auto Start Dev Server and Tailscale Routing are on. RepoBinder will reserve a port per Worktree and pass DEV_HOST to the setup script."
+                    : "Auto Start Dev Server is on. RepoBinder will reserve a port per Worktree and pass --port to the setup script."
+                }
                 icon={<Rocket size={17} />}
               />
             ) : null}

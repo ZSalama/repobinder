@@ -37,6 +37,7 @@ export type RepositorySettingsRecord = {
     command?: string;
     defaultArgs: string[];
     autoStartDevServer: boolean;
+    tailscaleRouting: boolean;
   };
   createdAt: string;
   updatedAt: string;
@@ -221,6 +222,7 @@ export function createDefaultRepositorySettings(repositoryId: string, timestamp 
       enabled: false,
       defaultArgs: [],
       autoStartDevServer: false,
+      tailscaleRouting: false,
     },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -283,7 +285,7 @@ function normalizeStoreV1(document: Record<string, unknown>): RepoBinderStore {
     updatedAt: readString(document.updatedAt) ?? timestamp,
     selection: readSelection(document.selection),
     repositories: readArray<RepositoryRecord>(document.repositories),
-    repositorySettings: readArray<RepositorySettingsRecord>(document.repositorySettings),
+    repositorySettings: normalizeRepositorySettings(readArray<RepositorySettingsRecord>(document.repositorySettings)),
     worktrees: readArray<WorktreeRecord>(document.worktrees),
     trackedProcesses: readArray<TrackedProcessRecord>(document.trackedProcesses),
     operations: readArray<OperationRecord>(document.operations).slice(-OPERATION_RETENTION_LIMIT),
@@ -304,6 +306,19 @@ function readSelection(value: unknown): SelectionRecord {
 
 function readArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (structuredClone(value) as T[]) : [];
+}
+
+function normalizeRepositorySettings(records: RepositorySettingsRecord[]): RepositorySettingsRecord[] {
+  return records.map((record) => ({
+    ...record,
+    setup: {
+      ...record.setup,
+      defaultArgs: Array.isArray(record.setup.defaultArgs) ? record.setup.defaultArgs : [],
+      autoStartDevServer: Boolean(record.setup.enabled) && Boolean(record.setup.autoStartDevServer),
+      tailscaleRouting:
+        Boolean(record.setup.enabled) && Boolean(record.setup.autoStartDevServer) && Boolean(record.setup.tailscaleRouting),
+    },
+  }));
 }
 
 function readString(value: unknown): string | undefined {

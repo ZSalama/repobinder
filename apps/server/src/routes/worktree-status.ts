@@ -12,7 +12,7 @@ import { inspectRepository } from "../git/inspection";
 import { Worktree } from "../lib/types";
 import { probeDevServerStatus, probeProcessStatus } from "../setup/devserver";
 import { isLocalhostUrl, isPortReachable, parseUrlHost, parseUrlPort } from "../setup/status";
-import { DevServerStatus, TrackedProcessStatus, WorktreeRecord } from "../store";
+import { createDefaultRepositorySettings, DevServerStatus, TrackedProcessStatus, WorktreeRecord } from "../store";
 
 export const worktreeStatusRouter = Router();
 
@@ -146,8 +146,9 @@ worktreeStatusRouter.post("/api/repositories/:repositoryId/worktree-status", asy
 });
 
 // Open Dev verifies host-side reachability before the client opens the URL.
-// Only localhost URLs are actionable. Failures create a warning Operation
-// Record; successes do not.
+// Localhost URLs and known ports are actionable. With Tailscale Routing enabled,
+// the response URL can use the requesting browser's host while reachability is
+// still checked from the RepoBinder host.
 worktreeStatusRouter.post(
   "/api/repositories/:repositoryId/worktrees/:worktreeId/open-dev",
   async (request, response, next) => {
@@ -165,20 +166,21 @@ worktreeStatusRouter.post(
         throw new ApiError(404, `Worktree Record not found: ${worktreeId}`);
       }
 
-      const url = resolveDevServerUrl(worktree.devServer);
+      const settings =
+        store.repositorySettings.find((record) => record.repositoryId === repositoryId) ??
+        createDefaultRepositorySettings(repositoryId);
+      const tailscaleRouting = settings.setup.enabled && settings.setup.autoStartDevServer && settings.setup.tailscaleRouting;
+      const devServerUrl = resolveDevServerUrl(worktree.devServer, {
+        requestHost: request.headers.host,
+        requestProtocol: request.protocol,
+        tailscaleRouting,
+      });
 
-      if (!url) {
-        throw new ApiError(400, "No localhost Dev Server URL is known for this Worktree");
+      if (!devServerUrl) {
+        throw new ApiError(400, "No actionable Dev Server URL is known for this Worktree");
       }
 
-      const host = parseUrlHost(url) ?? "127.0.0.1";
-      const port = parseUrlPort(url);
-
-      if (port === undefined) {
-        throw new ApiError(400, "Dev Server URL does not include a port to verify");
-      }
-
-      const reachable = await isPortReachable(host, port);
+      const reachable = await isPortReachable(devServerUrl.reachabilityHost, devServerUrl.reachabilityPort);
 
       if (!reachable) {
         await recordOperationSafely({
@@ -188,11 +190,11 @@ worktreeStatusRouter.post(
           summary: "Dev Server is not reachable",
           repositoryId,
           worktreeId,
-          details: compactJsonObject({ url }),
+          details: compactJsonObject({ url: devServerUrl.url }),
         });
       }
 
-      response.json({ url, reachable });
+      response.json({ url: devServerUrl.url, reachable });
     } catch (error) {
       await recordOperationSafely({
         type: "worktree.open-dev",
@@ -209,20 +211,74 @@ worktreeStatusRouter.post(
   },
 );
 
-function resolveDevServerUrl(devServer: { url?: string; port?: number } | undefined): string | undefined {
+type DevServerUrlResolution = {
+  url: string;
+  reachabilityHost: string;
+  reachabilityPort: number;
+};
+
+function resolveDevServerUrl(
+  devServer: { url?: string; port?: number } | undefined,
+  options: { requestHost?: string; requestProtocol: string; tailscaleRouting: boolean },
+): DevServerUrlResolution | undefined {
   if (!devServer) {
     return undefined;
   }
 
-  if (devServer.url) {
-    return isLocalhostUrl(devServer.url) ? devServer.url : undefined;
+  const port = devServer.port ?? (devServer.url ? parseUrlPort(devServer.url) : undefined);
+
+  if (port === undefined) {
+    return undefined;
+  }
+
+  const reachabilityHost = devServer.url ? parseUrlHost(devServer.url) ?? "127.0.0.1" : "127.0.0.1";
+  const remoteUrl = options.tailscaleRouting
+    ? buildRemoteDevServerUrl(options.requestHost, options.requestProtocol, port)
+    : undefined;
+
+  if (remoteUrl) {
+    return { url: remoteUrl, reachabilityHost, reachabilityPort: port };
+  }
+
+  if (devServer.url && isLocalhostUrl(devServer.url)) {
+    return { url: devServer.url, reachabilityHost, reachabilityPort: port };
   }
 
   if (devServer.port !== undefined) {
-    return `http://127.0.0.1:${devServer.port}`;
+    return { url: `http://127.0.0.1:${port}`, reachabilityHost: "127.0.0.1", reachabilityPort: port };
   }
 
   return undefined;
+}
+
+function buildRemoteDevServerUrl(requestHost: string | undefined, requestProtocol: string, port: number): string | undefined {
+  const hostname = parseRequestHostname(requestHost);
+
+  if (!hostname || isLoopbackHostname(hostname)) {
+    return undefined;
+  }
+
+  return `${requestProtocol}://${formatUrlHostname(hostname)}:${port}`;
+}
+
+function parseRequestHostname(requestHost: string | undefined): string | undefined {
+  if (!requestHost) {
+    return undefined;
+  }
+
+  try {
+    return new URL(`http://${requestHost}`).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function formatUrlHostname(hostname: string): string {
+  return hostname.includes(":") && !hostname.startsWith("[") ? `[${hostname}]` : hostname;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }
 
 function findMatchingInspectedWorktree(record: WorktreeRecord, inspectedWorktrees: Worktree[]): Worktree | undefined {

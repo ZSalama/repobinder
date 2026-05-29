@@ -42,6 +42,7 @@ export type RepositorySettings = {
     command?: string;
     defaultArgs: string[];
     autoStartDevServer: boolean;
+    tailscaleRouting: boolean;
   };
   createdAt: string;
   updatedAt: string;
@@ -125,6 +126,7 @@ export type NewWorktreeContext = {
   dirty: boolean;
   setupEnabled: boolean;
   autoStartDevServer: boolean;
+  tailscaleRouting: boolean;
 };
 
 export type SetupRowResult = {
@@ -221,6 +223,7 @@ export type SettingsDraft = {
   command: string;
   defaultArgsText: string;
   autoStartDevServer: boolean;
+  tailscaleRouting: boolean;
 };
 
 export type Banner = {
@@ -233,7 +236,7 @@ declare global {
     repobinderDesktop?: {
       getDesktopContext: () => Promise<DesktopContext>;
       pickRepositoryFolder: () => Promise<string | undefined>;
-      openExternal: (url: string) => Promise<boolean>;
+      copyDevServerUrl: (url: string) => Promise<boolean>;
     };
   }
 }

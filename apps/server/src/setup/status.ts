@@ -43,10 +43,45 @@ export function isPortReachable(host: string, port: number, timeoutMs = 750): Pr
   });
 }
 
-// A port is considered already in use for reservation purposes when something is
-// listening on the loopback interface.
+// A port is considered already in use for reservation purposes when RepoBinder
+// cannot bind the same host/port that the Dev Server will use.
 export function isPortListening(port: number, timeoutMs = 300): Promise<boolean> {
-  return isPortReachable("127.0.0.1", port, timeoutMs);
+  return canListen("127.0.0.1", port, timeoutMs).then((available) => !available);
+}
+
+export function canListen(host: string, port: number, timeoutMs = 300): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    let settled = false;
+
+    const finish = (available: boolean): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+
+      if (available) {
+        server.close(() => resolve(true));
+        return;
+      }
+
+      try {
+        server.close();
+      } catch {
+        // The server may never have reached listening state.
+      }
+
+      resolve(false);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    server.once("error", () => finish(false));
+    server.once("listening", () => finish(true));
+    server.listen(port, normalizeListenHost(host));
+  });
 }
 
 export function isLocalhostUrl(url: string): boolean {
@@ -92,6 +127,14 @@ function normalizeConnectHost(host: string): string {
   // Treat the wildcard bind address as loopback for local reachability checks.
   if (host === "0.0.0.0") {
     return "127.0.0.1";
+  }
+
+  return host;
+}
+
+function normalizeListenHost(host: string): string {
+  if (host === "[::1]") {
+    return "::1";
   }
 
   return host;

@@ -6,6 +6,7 @@ export function createSettingsDraft(settings: RepositorySettings): SettingsDraft
     command: settings.setup.command ?? "",
     defaultArgsText: settings.setup.defaultArgs.join("\n"),
     autoStartDevServer: settings.setup.autoStartDevServer,
+    tailscaleRouting: settings.setup.tailscaleRouting,
   };
 }
 

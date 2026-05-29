@@ -4,7 +4,7 @@ import path from "node:path";
 import { ApiError } from "../lib/errors";
 import { SetupStatus, TrackedProcessRole } from "../store";
 import { parseSetupMetadata, SetupMetadata } from "./metadata";
-import { isPortListening } from "./status";
+import { canListen } from "./status";
 
 export const SETUP_TIMEOUT_MS = 10 * 60 * 1000;
 export const SETUP_OUTPUT_LIMIT_BYTES = 256 * 1024;
@@ -23,6 +23,7 @@ export type SetupRunContext = {
   linkedWorktreePath: string;
   branch: string;
   baseBranch: string;
+  devHost?: string;
 };
 
 export type TrackedProcessInput = {
@@ -52,9 +53,9 @@ export type SetupRunResult = {
   launchError?: string;
 };
 
-// Reserve a contiguous count of free loopback ports for a batch, scanning upward
-// from 3000 and skipping ports that are already listening or already reserved.
-export async function reserveBatchPorts(count: number): Promise<number[]> {
+// Reserve a count of free ports for a batch, scanning upward from 3000 and
+// skipping ports that cannot be bound on the target Dev Server host.
+export async function reserveBatchPorts(count: number, host = "127.0.0.1"): Promise<number[]> {
   const reserved: number[] = [];
 
   for (let candidate = PORT_RESERVATION_START; reserved.length < count; candidate += 1) {
@@ -66,7 +67,7 @@ export async function reserveBatchPorts(count: number): Promise<number[]> {
       continue;
     }
 
-    if (!(await isPortListening(candidate))) {
+    if (await canListen(host, candidate)) {
       reserved.push(candidate);
     }
   }
@@ -323,11 +324,17 @@ function isPathLikeCommand(command: string): boolean {
 }
 
 function buildSetupEnvironment(context: SetupRunContext): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     REPOBINDER_PRIMARY_WORKTREE_PATH: context.primaryWorktreePath,
     REPOBINDER_LINKED_WORKTREE_PATH: context.linkedWorktreePath,
     REPOBINDER_BRANCH: context.branch,
     REPOBINDER_BASE_BRANCH: context.baseBranch,
   };
+
+  if (context.devHost) {
+    env.DEV_HOST = context.devHost;
+  }
+
+  return env;
 }

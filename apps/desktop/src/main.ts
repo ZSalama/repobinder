@@ -5,7 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 
 const DEFAULT_PORT = 3774;
@@ -45,16 +45,16 @@ ipcMain.handle("repobinder:get-desktop-context", () => ({
   desktopAuthToken: desktopToken,
 }));
 
-// Open Dev opens the Worktree's Dev Server URL in the user's default browser.
+// Open Dev copies the Worktree's Dev Server URL from the desktop shell.
 // Only loopback URLs are accepted so repository scripts cannot turn RepoBinder
-// into an arbitrary URL launcher.
-ipcMain.handle("repobinder:open-external", async (_event, url: unknown) => {
+// into an arbitrary clipboard writer.
+ipcMain.handle("repobinder:copy-dev-server-url", (_event, url: unknown) => {
   if (typeof url !== "string" || !isLoopbackUrl(url)) {
     return false;
   }
 
   try {
-    await shell.openExternal(url);
+    clipboard.writeText(url);
     return true;
   } catch (error) {
     console.error(error);

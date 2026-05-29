@@ -334,14 +334,26 @@ export function App(): JSX.Element {
         { method: "POST" },
       );
 
-      const opened = window.repobinderDesktop?.openExternal
-        ? await window.repobinderDesktop.openExternal(result.url)
+      const desktopBridge = window.repobinderDesktop;
+      const shouldCopy = Boolean(desktopBridge);
+      const actionSucceeded = desktopBridge
+        ? await desktopBridge.copyDevServerUrl(result.url)
         : Boolean(window.open(result.url, "_blank", "noopener,noreferrer"));
 
-      if (!result.reachable) {
-        setBanner({ tone: "warning", text: "Dev Server is not reachable from the RepoBinder host" });
-      } else if (!opened) {
-        setBanner({ tone: "warning", text: "Could not open the Dev Server URL" });
+      if (!actionSucceeded) {
+        setBanner({
+          tone: "warning",
+          text: shouldCopy ? "Could not copy the Dev Server URL" : "Could not open the Dev Server URL",
+        });
+      } else if (!result.reachable) {
+        setBanner({
+          tone: "warning",
+          text: shouldCopy
+            ? "Dev Server URL copied, but it is not reachable from the RepoBinder host"
+            : "Dev Server is not reachable from the RepoBinder host",
+        });
+      } else if (shouldCopy) {
+        setBanner({ tone: "success", text: "Dev Server URL copied to clipboard" });
       }
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
@@ -429,6 +441,7 @@ export function App(): JSX.Element {
             command: settingsDraft.command,
             defaultArgs: parseArgsText(settingsDraft.defaultArgsText),
             autoStartDevServer: settingsDraft.autoStartDevServer,
+            tailscaleRouting: settingsDraft.tailscaleRouting,
           },
         }),
       });
@@ -727,6 +740,7 @@ export function App(): JSX.Element {
             selectedWorktree={selectedWorktree}
             selectedWorktreeId={selectedWorktreeId}
             isBusy={isBusy}
+            devServerAction={isDesktop ? "copy" : "open"}
             onOpenDev={(worktreeId) => void openDevServer(worktreeId)}
             onRequestDelete={setDeleteTarget}
           />

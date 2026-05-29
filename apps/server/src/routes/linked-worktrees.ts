@@ -378,6 +378,7 @@ linkedWorktreesRouter.get("/api/repositories/:repositoryId/new-worktree-context"
       dirty,
       setupEnabled: settings.setup.enabled,
       autoStartDevServer: settings.setup.enabled && settings.setup.autoStartDevServer,
+      tailscaleRouting: settings.setup.enabled && settings.setup.autoStartDevServer && settings.setup.tailscaleRouting,
     });
   } catch (error) {
     next(error);
@@ -403,6 +404,7 @@ linkedWorktreesRouter.post("/api/repositories/:repositoryId/worktrees", async (r
       createDefaultRepositorySettings(repositoryId);
     const setupEnabled = settings.setup.enabled && Boolean(settings.setup.command);
     const autoStartDevServer = setupEnabled && settings.setup.autoStartDevServer;
+    const tailscaleRouting = autoStartDevServer && settings.setup.tailscaleRouting;
 
     if (autoStartDevServer) {
       if (argsContainPort(sharedArgs)) {
@@ -446,7 +448,8 @@ linkedWorktreesRouter.post("/api/repositories/:repositoryId/worktrees", async (r
 
     const result = await runExclusiveMutation("worktree.create-batch", async () => {
       // Reserve all ports for the batch before any Git creation starts.
-      const reservedPorts = autoStartDevServer ? await reserveBatchPorts(resolvedRows.length) : [];
+      const devHost = tailscaleRouting ? "0.0.0.0" : "127.0.0.1";
+      const reservedPorts = autoStartDevServer ? await reserveBatchPorts(resolvedRows.length, devHost) : [];
       const outcomes: RowOutcome[] = [];
 
       // Run Git creation and the Worktree Setup Script sequentially per row.
@@ -487,6 +490,7 @@ linkedWorktreesRouter.post("/api/repositories/:repositoryId/worktrees", async (r
               linkedWorktreePath: row.worktreePath,
               branch: row.branchName,
               baseBranch,
+              devHost: tailscaleRouting ? devHost : undefined,
             },
           });
 
@@ -636,6 +640,7 @@ linkedWorktreesRouter.post("/api/repositories/:repositoryId/worktrees", async (r
             failed: gitFailedCount,
             setupFailed: setupFailedCount,
             setupWarning: setupWarningCount,
+            tailscaleRouting,
             dirty,
             warnings: warnings as JsonValue,
             rows: outcomes.map((outcome) =>

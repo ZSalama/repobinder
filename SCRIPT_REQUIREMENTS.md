@@ -43,6 +43,9 @@ Repository Settings store setup configuration as structured argv:
 - `command`: executable name or script path.
 - `defaultArgs`: default argv entries for every setup run in that Repository.
 - `autoStartDevServer`: whether RepoBinder reserves a port and appends `--port <number>`.
+- `tailscaleRouting`: whether Auto Start Dev Server also asks the setup script to bind the Dev Server to a network-reachable host for Tailscale access.
+
+The Repository Settings UI should display `tailscaleRouting` as a checkbox labeled `Tailscale Routing` near Auto Start Dev Server. It has no effect unless setup and Auto Start Dev Server are both enabled.
 
 Recommended command shape:
 
@@ -104,6 +107,12 @@ The setup process inherits the backend process environment and receives these st
 - `REPOBINDER_BASE_BRANCH`: Branch name used as the Git base for `git worktree add`.
 
 These variables are for paths and Git context only. RepoBinder does not pass secret values through environment variables.
+
+When Auto Start Dev Server is enabled, RepoBinder may also pass Dev Server bind context:
+
+- `DEV_HOST`: desired host binding for the Dev Server. When Tailscale Routing is enabled, RepoBinder passes `0.0.0.0`. When Tailscale Routing is disabled, RepoBinder should omit `DEV_HOST`, and setup scripts should default to `127.0.0.1` or `localhost`.
+
+`DEV_HOST` is not a secret. It is a bind-host request for the Dev Server only, not a general project environment variable.
 
 ## Required Script Behavior
 
@@ -174,7 +183,7 @@ Requirements:
 
 ## Auto Start Dev Server
 
-When Auto Start Dev Server is enabled, RepoBinder reserves one loopback port per Linked Worktree in the batch, starting at `3000` and scanning upward.
+When Auto Start Dev Server is enabled, RepoBinder reserves one port per Linked Worktree in the batch, starting at `3000` and scanning upward.
 
 RepoBinder appends the reserved port after all configured args:
 
@@ -184,19 +193,24 @@ RepoBinder appends the reserved port after all configured args:
 
 If a project wants RepoBinder to open and later clean up Dev Servers, the setup script should support `--port <number>`.
 
+By default, Auto Start Dev Server is localhost-only. If Tailscale Routing is enabled for the Repository, RepoBinder also sets `DEV_HOST=0.0.0.0` for the setup run so the script can bind the Dev Server to an address reachable through the RepoBinder machine's Tailscale IP.
+
 When `--port` is present, the script should:
 
 - Validate that the port value is an integer from `1` to `65535`.
 - Check whether the port is still available immediately before starting the server.
 - Start the Dev Server on that exact port.
 - Wait until the Dev Server is listening before reporting success metadata.
-- Bind to `127.0.0.1` or `localhost` unless the project has a specific safe reason not to.
+- Bind to `${DEV_HOST:-127.0.0.1}` or an equivalent project-specific default.
+- Treat `DEV_HOST=0.0.0.0` as an explicit request to listen on all interfaces.
 - Return Dev Server metadata with the URL, port, and PID when available.
 - Return process metadata for any long-running process RepoBinder should track and stop later.
 
 RepoBinder checks ports before invoking setup, but the script must tolerate races where another process takes the port before the Dev Server starts.
 
 If Auto Start Dev Server is disabled, users may still pass project-specific args. The script may start a Dev Server only when the project's own args say to do so.
+
+Tailscale Routing does not configure Tailscale and does not restrict the Dev Server to the Tailscale interface. Binding to `0.0.0.0` may also expose the Dev Server on local network interfaces, so projects should treat this as a trusted-development-machine feature unless they add their own access controls.
 
 ## Output Contract
 
@@ -290,7 +304,7 @@ http://localhost:3000
 http://127.0.0.1:3000
 ```
 
-Avoid non-local URLs in setup metadata. RepoBinder may store non-local metadata, but Open Dev is intended for localhost Dev Servers in this version.
+Avoid non-local URLs in setup metadata. RepoBinder may store non-local metadata, but setup scripts should usually report a localhost URL or port even when Tailscale Routing is enabled. RepoBinder is responsible for turning a known port into a client-appropriate URL when the user is accessing RepoBinder through a remote address.
 
 If only `port` is reported, RepoBinder can derive:
 
@@ -323,7 +337,8 @@ exec 3>&1
 exec 1>&2
 
 # Start a background process without inheriting descriptor 3.
-(cd "$worktree_root" && pnpm dev --host 127.0.0.1 --port "$port" > .repobinder-dev.log 2>&1 3>&- & echo $! > .repobinder-dev.pid)
+dev_host="${DEV_HOST:-127.0.0.1}"
+(cd "$worktree_root" && pnpm dev --host "$dev_host" --port "$port" > .repobinder-dev.log 2>&1 3>&- & echo $! > .repobinder-dev.pid)
 ```
 
 ## Failure And Warning Behavior
@@ -459,10 +474,11 @@ if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
 fi
 
 port_reachable() {
-  node - "$1" <<'NODE'
+  node - "$1" "$2" <<'NODE'
 const net = require("node:net");
-const port = Number(process.argv[2]);
-const socket = net.connect({ host: "127.0.0.1", port }, () => {
+const host = process.argv[2] === "0.0.0.0" ? "127.0.0.1" : process.argv[2];
+const port = Number(process.argv[3]);
+const socket = net.connect({ host, port }, () => {
   socket.destroy();
   process.exit(0);
 });
@@ -475,7 +491,9 @@ socket.on("timeout", () => {
 NODE
 }
 
-if port_reachable "$port"; then
+dev_host="${DEV_HOST:-127.0.0.1}"
+
+if port_reachable "$dev_host" "$port"; then
   echo "Port $port is already in use"
   exit 1
 fi
@@ -483,13 +501,13 @@ fi
 log_file="$worktree_root/.repobinder-dev.log"
 pid_file="$worktree_root/.repobinder-dev.pid"
 
-(pnpm dev --host 127.0.0.1 --port "$port" > "$log_file" 2>&1 3>&- & echo $! > "$pid_file")
+(pnpm dev --host "$dev_host" --port "$port" > "$log_file" 2>&1 3>&- & echo $! > "$pid_file")
 dev_pid="$(cat "$pid_file")"
 url="http://localhost:$port"
 
 server_ready=0
 for _ in {1..40}; do
-  if port_reachable "$port"; then
+  if port_reachable "$dev_host" "$port"; then
     server_ready=1
     break
   fi
@@ -515,7 +533,7 @@ process.stdout.write(JSON.stringify({
       role: "dev_server",
       primary: true,
       command: "pnpm",
-      args: ["dev", "--host", "127.0.0.1", "--port", "$port"],
+      args: ["dev", "--host", "$dev_host", "--port", "$port"],
       url: "$url",
       port: Number("$port")
     }
@@ -542,8 +560,9 @@ When asking an LLM to generate a Worktree Setup Script for a project, require it
 - [ ] The script handles missing optional local config with warnings.
 - [ ] The script never prints secrets.
 - [ ] The script supports `--port <number>` if Auto Start Dev Server should be used.
+- [ ] The script defaults the Dev Server bind host to localhost and honors `DEV_HOST=0.0.0.0` when Tailscale Routing is enabled.
 - [ ] The script waits for a started Dev Server to become reachable before reporting success metadata.
-- [ ] The script returns localhost Dev Server metadata when it starts a server.
+- [ ] The script returns localhost Dev Server metadata or a port when it starts a server.
 - [ ] The script returns valid PIDs for long-running processes RepoBinder should stop later.
 - [ ] Background processes do not inherit RepoBinder stdout.
 - [ ] The script is safe to rerun manually inside a Linked Worktree.
