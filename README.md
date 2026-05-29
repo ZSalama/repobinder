@@ -14,6 +14,16 @@ RepoBinder is early software. It is built for local development workflows today;
 - Remove Linked Worktrees and optionally delete their branches.
 - Run as an Electron desktop app or as a local browser-accessible backend.
 
+## Installing
+
+Installable builds are published from GitHub Releases. Download the latest release asset for your operating system:
+
+- Windows: `.exe` installer or `.zip`
+- macOS: `.dmg` installer or `.zip`
+- Linux: `.AppImage` or `.deb`
+
+Current release builds are unsigned. Windows SmartScreen and macOS Gatekeeper may warn until code signing is configured.
+
 ## Security Model
 
 RepoBinder is designed to run on a developer machine and binds to `127.0.0.1` by default.
@@ -74,6 +84,32 @@ Useful scripts:
 - `pnpm run dev` builds and starts the desktop app in one command.
 - `pnpm run start` starts only the backend.
 - `pnpm run typecheck` runs TypeScript checks for the web, server, and desktop apps.
+
+## Release Process
+
+Installers are built with `electron-builder` and published by the GitHub Actions workflow in `.github/workflows/release.yml`.
+
+To publish a release:
+
+```sh
+pnpm version patch --no-git-tag-version
+pnpm run typecheck
+pnpm run build
+git commit -am "Release v0.1.1"
+git tag v0.1.1
+git push origin main --tags
+```
+
+Use a tag that matches the `package.json` version with a leading `v`. The workflow builds Linux, macOS, and Windows installers and uploads them to a draft GitHub Release. Review the generated draft release notes and assets in GitHub, then publish the release.
+
+For local packaging checks:
+
+```sh
+pnpm run pack
+pnpm run dist:linux
+```
+
+Build platform-specific installers on the matching operating system when possible. The GitHub workflow handles the full cross-platform release set.
 
 ## Worktree Setup Scripts
 

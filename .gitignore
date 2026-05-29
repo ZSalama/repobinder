@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 dist-web/
+release/
 
 # Local environment
 .env
@@ -14,8 +15,5 @@ dist-web/
 *.log
 .DS_Store
 
-# Local agent/workflow state
-.scratch/
-.agents/
-.claude/
-skills-lock.json
+# Local agent/workflow overrides
+.claude/settings.local.json
