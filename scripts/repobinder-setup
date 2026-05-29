@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# stdout is reserved for optional RepoBinder metadata JSON.
+exec 3>&1
+exec 1>&2
+
+port=""
+
+usage() {
+  echo "Usage: scripts/repobinder-setup [--port <number>]"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --port"
+        usage
+        exit 2
+      fi
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -n "$port" ]]; then
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+    echo "Invalid --port value: $port"
+    exit 2
+  fi
+fi
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Required command not found on PATH: $1"
+    exit 127
+  fi
+}
+
+require_command git
+require_command node
+
+worktree_root="$(git rev-parse --show-toplevel)"
+cd "$worktree_root"
+
+if [[ ! -f package.json || ! -f pnpm-lock.yaml ]]; then
+  echo "Expected to run from the RepoBinder project root with package.json and pnpm-lock.yaml"
+  exit 1
+fi
+
+if command -v corepack >/dev/null 2>&1; then
+  corepack enable
+fi
+
+require_command pnpm
+
+echo "Installing dependencies in $worktree_root"
+pnpm install --frozen-lockfile
+
+echo "Building RepoBinder"
+pnpm run build
+
+if [[ -z "$port" ]]; then
+  exit 0
+fi
+
+port_reachable() {
+  node - "$1" "$2" <<'NODE'
+const net = require("node:net");
+const host = process.argv[2] === "0.0.0.0" ? "127.0.0.1" : process.argv[2];
+const port = Number(process.argv[3]);
+const socket = net.connect({ host, port }, () => {
+  socket.destroy();
+  process.exit(0);
+});
+socket.setTimeout(250);
+socket.on("error", () => process.exit(1));
+socket.on("timeout", () => {
+  socket.destroy();
+  process.exit(1);
+});
+NODE
+}
+
+http_ready() {
+  node - "$1" "$2" <<'NODE'
+const http = require("node:http");
+const host = process.argv[2] === "0.0.0.0" ? "127.0.0.1" : process.argv[2];
+const port = Number(process.argv[3]);
+const request = http.get({ host, port, path: "/health", timeout: 500 }, (response) => {
+  response.resume();
+  process.exit(response.statusCode >= 200 && response.statusCode < 500 ? 0 : 1);
+});
+request.on("timeout", () => {
+  request.destroy();
+  process.exit(1);
+});
+request.on("error", () => process.exit(1));
+NODE
+}
+
+dev_host="${DEV_HOST:-127.0.0.1}"
+if [[ -z "$dev_host" ]]; then
+  dev_host="127.0.0.1"
+fi
+
+if port_reachable "$dev_host" "$port"; then
+  echo "Port $port is already in use"
+  exit 1
+fi
+
+log_file="$worktree_root/.repobinder-dev.log"
+pid_file="$worktree_root/.repobinder-dev.pid"
+
+echo "Starting RepoBinder backend on ${dev_host}:${port}"
+if command -v setsid >/dev/null 2>&1; then
+  (setsid env HOST="$dev_host" PORT="$port" node dist/server/index.js > "$log_file" 2>&1 < /dev/null 3>&- & echo $! > "$pid_file")
+else
+  (nohup env HOST="$dev_host" PORT="$port" node dist/server/index.js > "$log_file" 2>&1 < /dev/null 3>&- & echo $! > "$pid_file")
+fi
+dev_pid="$(cat "$pid_file")"
+
+server_ready=0
+for _ in {1..40}; do
+  if ! kill -0 "$dev_pid" >/dev/null 2>&1; then
+    echo "Dev Server process exited before becoming ready. See $log_file"
+    exit 1
+  fi
+
+  if http_ready "$dev_host" "$port"; then
+    server_ready=1
+    break
+  fi
+
+  sleep 0.5
+done
+
+if [[ "$server_ready" != "1" ]]; then
+  echo "Dev Server did not become reachable on port $port. See $log_file"
+  exit 1
+fi
+
+url="http://localhost:$port"
+
+node - "$dev_pid" "$port" "$dev_host" "$url" <<'NODE' >&3
+const [pidRaw, portRaw, host, url] = process.argv.slice(2);
+const pid = Number(pidRaw);
+const port = Number(portRaw);
+
+process.stdout.write(JSON.stringify({
+  status: "success",
+  devServer: {
+    url,
+    port,
+    pid
+  },
+  processes: [
+    {
+      pid,
+      role: "dev_server",
+      primary: true,
+      command: "node",
+      args: ["dist/server/index.js"],
+      url,
+      port
+    }
+  ]
+}));
+NODE

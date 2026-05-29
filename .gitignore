@@ -13,6 +13,7 @@ release/
 
 # Logs and local OS files
 *.log
+.repobinder-*.pid
 .DS_Store
 
 # Local agent/workflow overrides
