@@ -16,13 +16,18 @@ import { ActivitySheet } from "@/components/activity-sheet";
 import { BannerMessage } from "@/components/banner-message";
 import { ConnectionPill } from "@/components/connection-pill";
 import { DeleteWorktreeDialog } from "@/components/delete-worktree-dialog";
+import { GlobalSettingsSheet } from "@/components/global-settings-sheet";
 import { MobileSidebarSheet } from "@/components/mobile-sidebar-sheet";
 import { NewWorktreeSheet } from "@/components/new-worktree-sheet";
 import { RepositoryDashboard } from "@/components/repository-dashboard";
 import { SettingsSheet } from "@/components/settings-sheet";
 import { SidebarContent } from "@/components/sidebar-content";
 import { api, safeParseSocketMessage, toErrorMessage } from "@/lib/api";
-import { createAppSettingsDraft, createSettingsDraft, parseArgsText } from "@/lib/format";
+import {
+  createAppSettingsDraft,
+  createSettingsDraft,
+  parseArgsText,
+} from "@/lib/format";
 import {
   AppSettingsDraft,
   AppStateResource,
@@ -42,7 +47,9 @@ import {
 
 export function App(): JSX.Element {
   const [serverInfo, setServerInfo] = useState<ServerInfo | undefined>();
-  const [desktopContext, setDesktopContext] = useState<DesktopContext | undefined>();
+  const [desktopContext, setDesktopContext] = useState<
+    DesktopContext | undefined
+  >();
   const [appState, setAppState] = useState<AppStateResource | undefined>();
   const [socketState, setSocketState] = useState<SocketState>("connecting");
   const [loadFailure, setLoadFailure] = useState<string | undefined>();
@@ -51,16 +58,28 @@ export function App(): JSX.Element {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [appSettingsDraft, setAppSettingsDraft] = useState<AppSettingsDraft | undefined>();
-  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | undefined>();
+  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  const [appSettingsDraft, setAppSettingsDraft] = useState<
+    AppSettingsDraft | undefined
+  >();
+  const [settingsDraft, setSettingsDraft] = useState<
+    SettingsDraft | undefined
+  >();
   const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
-  const [newWorktreeContext, setNewWorktreeContext] = useState<NewWorktreeContext | undefined>();
+  const [newWorktreeContext, setNewWorktreeContext] = useState<
+    NewWorktreeContext | undefined
+  >();
   const [newWorktreeLoading, setNewWorktreeLoading] = useState(false);
   const [newWorktreeRows, setNewWorktreeRows] = useState<string[]>([""]);
   const [newWorktreeRowArgs, setNewWorktreeRowArgs] = useState<string[]>([""]);
-  const [newWorktreeSharedArgs, setNewWorktreeSharedArgs] = useState<string>("");
-  const [newWorktreeRowErrors, setNewWorktreeRowErrors] = useState<Record<number, string[]>>({});
-  const [deleteTarget, setDeleteTarget] = useState<WorktreeResource | undefined>();
+  const [newWorktreeSharedArgs, setNewWorktreeSharedArgs] =
+    useState<string>("");
+  const [newWorktreeRowErrors, setNewWorktreeRowErrors] = useState<
+    Record<number, string[]>
+  >({});
+  const [deleteTarget, setDeleteTarget] = useState<
+    WorktreeResource | undefined
+  >();
 
   const selectedRepository = useMemo(() => {
     if (!appState) {
@@ -68,21 +87,33 @@ export function App(): JSX.Element {
     }
 
     return (
-      appState.repositories.find((repository) => repository.repositoryId === appState.selection.repositoryId) ??
-      appState.repositories[0]
+      appState.repositories.find(
+        (repository) =>
+          repository.repositoryId === appState.selection.repositoryId,
+      ) ?? appState.repositories[0]
     );
   }, [appState]);
 
-  const selectedWorktreeId = appState?.selection.worktreeId ?? selectedRepository?.primaryWorktreeId;
-  const selectedWorktree = selectedRepository?.worktrees.find((worktree) => worktree.worktreeId === selectedWorktreeId);
-  const isDesktop = Boolean(window.repobinderDesktop && desktopContext?.desktopAuthToken);
+  const selectedWorktreeId =
+    appState?.selection.worktreeId ?? selectedRepository?.primaryWorktreeId;
+  const selectedWorktree = selectedRepository?.worktrees.find(
+    (worktree) => worktree.worktreeId === selectedWorktreeId,
+  );
+  const isDesktop = Boolean(
+    window.repobinderDesktop && desktopContext?.desktopAuthToken,
+  );
   const isBusy = Boolean(busyAction);
-  const pollRef = useRef<{ busy: boolean; repositoryId?: string }>({ busy: false });
+  const pollRef = useRef<{ busy: boolean; repositoryId?: string }>({
+    busy: false,
+  });
   const seenOperationIdsRef = useRef<Set<string>>(new Set());
   const operationsInitializedRef = useRef(false);
   const appSettingsDraftInitializedRef = useRef(false);
   const settingsDraftRepositoryIdRef = useRef<string | undefined>();
-  pollRef.current = { busy: isBusy, repositoryId: selectedRepository?.repositoryId };
+  pollRef.current = {
+    busy: isBusy,
+    repositoryId: selectedRepository?.repositoryId,
+  };
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -101,7 +132,8 @@ export function App(): JSX.Element {
       return;
     }
 
-    const duration = banner.tone === "success" || banner.tone === "info" ? 5_000 : 12_000;
+    const duration =
+      banner.tone === "success" || banner.tone === "info" ? 5_000 : 12_000;
     const bannerKey = `${banner.tone}:${banner.text}`;
     const timeout = window.setTimeout(() => {
       setBanner((current) => {
@@ -122,7 +154,9 @@ export function App(): JSX.Element {
     }
 
     if (!operationsInitializedRef.current) {
-      seenOperationIdsRef.current = new Set(appState.operations.map((operation) => operation.operationId));
+      seenOperationIdsRef.current = new Set(
+        appState.operations.map((operation) => operation.operationId),
+      );
       operationsInitializedRef.current = true;
       return;
     }
@@ -135,7 +169,9 @@ export function App(): JSX.Element {
       seenOperationIdsRef.current.add(operation.operationId);
     }
 
-    const latestCompletedOperation = unseenOperations.find((operation) => operation.status !== "pending");
+    const latestCompletedOperation = unseenOperations.find(
+      (operation) => operation.status !== "pending",
+    );
 
     if (latestCompletedOperation) {
       setBanner(operationToBanner(latestCompletedOperation));
@@ -199,11 +235,9 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!settingsOpen) {
+    if (!globalSettingsOpen) {
       appSettingsDraftInitializedRef.current = false;
       setAppSettingsDraft(undefined);
-      settingsDraftRepositoryIdRef.current = undefined;
-      setSettingsDraft(undefined);
       return;
     }
 
@@ -211,14 +245,25 @@ export function App(): JSX.Element {
       appSettingsDraftInitializedRef.current = true;
       setAppSettingsDraft(createAppSettingsDraft(appState.appSettings));
     }
+  }, [appState, globalSettingsOpen]);
 
-    if (!selectedRepository || settingsDraftRepositoryIdRef.current === selectedRepository.repositoryId) {
+  useEffect(() => {
+    if (!settingsOpen) {
+      settingsDraftRepositoryIdRef.current = undefined;
+      setSettingsDraft(undefined);
+      return;
+    }
+
+    if (
+      !selectedRepository ||
+      settingsDraftRepositoryIdRef.current === selectedRepository.repositoryId
+    ) {
       return;
     }
 
     settingsDraftRepositoryIdRef.current = selectedRepository.repositoryId;
     setSettingsDraft(createSettingsDraft(selectedRepository.settings));
-  }, [appState, selectedRepository, settingsOpen]);
+  }, [selectedRepository, settingsOpen]);
 
   // Light status polling for the Selected Repository so the dashboard notices
   // stale Dev Servers without aggressive polling for every Repository.
@@ -238,14 +283,18 @@ export function App(): JSX.Element {
     setLoadFailure(undefined);
 
     try {
-      const desktop = await window.repobinderDesktop?.getDesktopContext().catch(() => undefined);
+      const desktop = await window.repobinderDesktop
+        ?.getDesktopContext()
+        .catch(() => undefined);
       const [nextServerInfo, nextState] = await Promise.all([
         api<ServerInfo>("/api/server"),
         api<AppStateResource>("/api/state"),
       ]);
 
       if (!operationsInitializedRef.current) {
-        seenOperationIdsRef.current = new Set(nextState.operations.map((operation) => operation.operationId));
+        seenOperationIdsRef.current = new Set(
+          nextState.operations.map((operation) => operation.operationId),
+        );
         operationsInitializedRef.current = true;
       }
       setDesktopContext(desktop);
@@ -257,7 +306,9 @@ export function App(): JSX.Element {
     }
   }
 
-  async function refreshState(options: { silent?: boolean } = {}): Promise<void> {
+  async function refreshState(
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
     if (!options.silent) {
       setBusyAction("refresh");
       setBanner(undefined);
@@ -277,7 +328,9 @@ export function App(): JSX.Element {
     }
   }
 
-  async function refreshSelectedRepository(options: { silent?: boolean } = {}): Promise<void> {
+  async function refreshSelectedRepository(
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
     const repositoryId = pollRef.current.repositoryId;
 
     if (!repositoryId) {
@@ -292,23 +345,30 @@ export function App(): JSX.Element {
     state: AppStateResource,
     options: { silent?: boolean } = {},
   ): Promise<void> {
-    const repositoryId = state.selection.repositoryId ?? state.repositories[0]?.repositoryId;
+    const repositoryId =
+      state.selection.repositoryId ?? state.repositories[0]?.repositoryId;
 
     if (repositoryId) {
       await refreshRepository(repositoryId, options);
     }
   }
 
-  async function refreshRepository(repositoryId: string, options: { silent?: boolean } = {}): Promise<void> {
+  async function refreshRepository(
+    repositoryId: string,
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
     if (!options.silent) {
       setBusyAction("refresh");
       setBanner(undefined);
     }
 
     try {
-      const refreshedState = await api<AppStateResource>(`/api/repositories/${repositoryId}/refresh`, {
-        method: "POST",
-      });
+      const refreshedState = await api<AppStateResource>(
+        `/api/repositories/${repositoryId}/refresh`,
+        {
+          method: "POST",
+        },
+      );
       setAppState(refreshedState);
       await refreshWorktreeStatus(repositoryId);
     } catch (error) {
@@ -324,9 +384,12 @@ export function App(): JSX.Element {
 
   async function refreshWorktreeStatus(repositoryId: string): Promise<void> {
     try {
-      const nextState = await api<AppStateResource>(`/api/repositories/${repositoryId}/worktree-status`, {
-        method: "POST",
-      });
+      const nextState = await api<AppStateResource>(
+        `/api/repositories/${repositoryId}/worktree-status`,
+        {
+          method: "POST",
+        },
+      );
       setAppState(nextState);
     } catch {
       // Status polling is best-effort and stays silent on failure.
@@ -353,7 +416,9 @@ export function App(): JSX.Element {
       if (!actionSucceeded) {
         setBanner({
           tone: "warning",
-          text: shouldCopy ? "Could not copy the Dev Server URL" : "Could not open the Dev Server URL",
+          text: shouldCopy
+            ? "Could not copy the Dev Server URL"
+            : "Could not open the Dev Server URL",
         });
       } else if (!result.reachable) {
         setBanner({
@@ -363,7 +428,10 @@ export function App(): JSX.Element {
             : "Dev Server is not reachable from the RepoBinder host",
         });
       } else if (shouldCopy) {
-        setBanner({ tone: "success", text: "Dev Server URL copied to clipboard" });
+        setBanner({
+          tone: "success",
+          text: "Dev Server URL copied to clipboard",
+        });
       }
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
@@ -379,7 +447,8 @@ export function App(): JSX.Element {
     setBanner(undefined);
 
     try {
-      const repositoryPath = await window.repobinderDesktop.pickRepositoryFolder();
+      const repositoryPath =
+        await window.repobinderDesktop.pickRepositoryFolder();
 
       if (!repositoryPath) {
         return;
@@ -403,7 +472,10 @@ export function App(): JSX.Element {
     }
   }
 
-  async function selectRepository(repositoryId: string, worktreeId?: string): Promise<void> {
+  async function selectRepository(
+    repositoryId: string,
+    worktreeId?: string,
+  ): Promise<void> {
     setBusyAction(`selection:${worktreeId ?? repositoryId}`);
 
     try {
@@ -422,22 +494,49 @@ export function App(): JSX.Element {
     }
   }
 
-  function openSettings(): void {
+  function openGlobalSettings(): void {
     if (!appState) {
       return;
     }
 
     appSettingsDraftInitializedRef.current = true;
     setAppSettingsDraft(createAppSettingsDraft(appState.appSettings));
-    settingsDraftRepositoryIdRef.current = selectedRepository?.repositoryId;
-    setSettingsDraft(selectedRepository ? createSettingsDraft(selectedRepository.settings) : undefined);
+    setGlobalSettingsOpen(true);
+  }
+
+  function openSettings(): void {
+    if (!selectedRepository) {
+      return;
+    }
+
+    settingsDraftRepositoryIdRef.current = selectedRepository.repositoryId;
+    setSettingsDraft(createSettingsDraft(selectedRepository.settings));
     setSettingsOpen(true);
   }
 
-  async function saveSettings(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function saveGlobalSettings(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
 
     if (!appState || !appSettingsDraft) {
+      return;
+    }
+
+    const remoteModeChanged =
+      appSettingsDraft.remoteModeEnabled !==
+      appState.appSettings.remoteMode.enabled;
+
+    if (!remoteModeChanged) {
+      setGlobalSettingsOpen(false);
+      return;
+    }
+
+    if (!window.repobinderDesktop || !desktopContext) {
+      setBanner({
+        tone: "danger",
+        text: "Desktop bridge is required for Remote Mode",
+      });
       return;
     }
 
@@ -445,16 +544,63 @@ export function App(): JSX.Element {
     setBanner(undefined);
 
     try {
-      const remoteModeChanged = appSettingsDraft.remoteModeEnabled !== appState.appSettings.remoteMode.enabled;
+      const nextState = await api<AppStateResource>(
+        "/api/app-settings",
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            remoteMode: {
+              enabled: appSettingsDraft.remoteModeEnabled,
+            },
+          }),
+        },
+        desktopContext,
+      );
 
-      if (remoteModeChanged && (!window.repobinderDesktop || !desktopContext)) {
-        throw new Error("Desktop bridge is required for Remote Mode");
+      setAppState(nextState);
+      setGlobalSettingsOpen(false);
+
+      const nextServerInfo = await window.repobinderDesktop?.setRemoteMode(
+        appSettingsDraft.remoteModeEnabled,
+      );
+
+      if (nextServerInfo) {
+        setServerInfo((current) =>
+          current
+            ? {
+                ...current,
+                host: nextServerInfo.host,
+                port: nextServerInfo.port,
+                remoteEnabled: nextServerInfo.remoteEnabled,
+              }
+            : current,
+        );
       }
 
-      let nextState = appState;
+      void refreshRepositoryForState(nextState, { silent: true });
+    } catch (error) {
+      setBanner({ tone: "danger", text: toErrorMessage(error) });
+    } finally {
+      setBusyAction(undefined);
+    }
+  }
 
-      if (selectedRepository && settingsDraft) {
-        nextState = await api<AppStateResource>(`/api/repositories/${selectedRepository.repositoryId}/settings`, {
+  async function saveSettings(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+
+    if (!selectedRepository || !settingsDraft) {
+      return;
+    }
+
+    setBusyAction("settings.save");
+    setBanner(undefined);
+
+    try {
+      const nextState = await api<AppStateResource>(
+        `/api/repositories/${selectedRepository.repositoryId}/settings`,
+        {
           method: "PATCH",
           body: JSON.stringify({
             setup: {
@@ -465,44 +611,11 @@ export function App(): JSX.Element {
               tailscaleRouting: settingsDraft.tailscaleRouting,
             },
           }),
-        });
-      }
-
-      if (remoteModeChanged) {
-        nextState = await api<AppStateResource>(
-          "/api/app-settings",
-          {
-            method: "PATCH",
-            body: JSON.stringify({
-              remoteMode: {
-                enabled: appSettingsDraft.remoteModeEnabled,
-              },
-            }),
-          },
-          desktopContext,
-        );
-      }
+        },
+      );
 
       setAppState(nextState);
       setSettingsOpen(false);
-
-      if (remoteModeChanged) {
-        const nextServerInfo = await window.repobinderDesktop?.setRemoteMode(appSettingsDraft.remoteModeEnabled);
-
-        if (nextServerInfo) {
-          setServerInfo((current) =>
-            current
-              ? {
-                  ...current,
-                  host: nextServerInfo.host,
-                  port: nextServerInfo.port,
-                  remoteEnabled: nextServerInfo.remoteEnabled,
-                }
-              : current,
-          );
-        }
-      }
-
       void refreshRepositoryForState(nextState, { silent: true });
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
@@ -520,7 +633,8 @@ export function App(): JSX.Element {
     setBanner(undefined);
 
     try {
-      const worktreePath = await window.repobinderDesktop.pickRepositoryFolder();
+      const worktreePath =
+        await window.repobinderDesktop.pickRepositoryFolder();
 
       if (!worktreePath) {
         return;
@@ -571,11 +685,15 @@ export function App(): JSX.Element {
   }
 
   function updateNewWorktreeRow(index: number, value: string): void {
-    setNewWorktreeRows((rows) => rows.map((row, rowIndex) => (rowIndex === index ? value : row)));
+    setNewWorktreeRows((rows) =>
+      rows.map((row, rowIndex) => (rowIndex === index ? value : row)),
+    );
   }
 
   function updateNewWorktreeRowArgs(index: number, value: string): void {
-    setNewWorktreeRowArgs((rows) => rows.map((row, rowIndex) => (rowIndex === index ? value : row)));
+    setNewWorktreeRowArgs((rows) =>
+      rows.map((row, rowIndex) => (rowIndex === index ? value : row)),
+    );
   }
 
   function addNewWorktreeRow(): void {
@@ -584,12 +702,18 @@ export function App(): JSX.Element {
   }
 
   function removeNewWorktreeRow(index: number): void {
-    setNewWorktreeRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
-    setNewWorktreeRowArgs((rows) => rows.filter((_, rowIndex) => rowIndex !== index));
+    setNewWorktreeRows((rows) =>
+      rows.filter((_, rowIndex) => rowIndex !== index),
+    );
+    setNewWorktreeRowArgs((rows) =>
+      rows.filter((_, rowIndex) => rowIndex !== index),
+    );
     setNewWorktreeRowErrors({});
   }
 
-  async function submitNewWorktree(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function submitNewWorktree(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
 
     if (!selectedRepository) {
@@ -601,17 +725,20 @@ export function App(): JSX.Element {
     setNewWorktreeRowErrors({});
 
     try {
-      const response = await fetch(`/api/repositories/${selectedRepository.repositoryId}/worktrees`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rows: newWorktreeRows.map((branchName, index) => ({
-            branchName,
-            args: parseArgsText(newWorktreeRowArgs[index] ?? ""),
-          })),
-          sharedArgs: parseArgsText(newWorktreeSharedArgs),
-        }),
-      });
+      const response = await fetch(
+        `/api/repositories/${selectedRepository.repositoryId}/worktrees`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rows: newWorktreeRows.map((branchName, index) => ({
+              branchName,
+              args: parseArgsText(newWorktreeRowArgs[index] ?? ""),
+            })),
+            sharedArgs: parseArgsText(newWorktreeSharedArgs),
+          }),
+        },
+      );
       const body = (await response.json().catch(() => undefined)) as
         | (BatchResponse & { error?: string; rows?: BatchValidationRow[] })
         | undefined;
@@ -625,11 +752,16 @@ export function App(): JSX.Element {
           }
 
           setNewWorktreeRowErrors(errors);
-          setBanner({ tone: "danger", text: body?.error ?? "New Worktree validation failed" });
+          setBanner({
+            tone: "danger",
+            text: body?.error ?? "New Worktree validation failed",
+          });
           return;
         }
 
-        throw new Error(typeof body?.error === "string" ? body.error : response.statusText);
+        throw new Error(
+          typeof body?.error === "string" ? body.error : response.statusText,
+        );
       }
 
       if (body?.state) {
@@ -681,7 +813,11 @@ export function App(): JSX.Element {
           </div>
           <h1 id="startup-failed-title">RepoBinder</h1>
           <p>{loadFailure}</p>
-          <button className="primaryButton inlineButton" type="button" onClick={() => void boot()}>
+          <button
+            className="primaryButton inlineButton"
+            type="button"
+            onClick={() => void boot()}
+          >
             <RefreshCw size={16} />
             <span>Retry</span>
           </button>
@@ -710,7 +846,10 @@ export function App(): JSX.Element {
           isDesktop={isDesktop}
           isBusy={isBusy}
           onAddRepository={() => void addRepository()}
-          onSelectRepository={(repositoryId, worktreeId) => void selectRepository(repositoryId, worktreeId)}
+          onOpenGlobalSettings={openGlobalSettings}
+          onSelectRepository={(repositoryId, worktreeId) =>
+            void selectRepository(repositoryId, worktreeId)
+          }
         />
       </aside>
 
@@ -728,18 +867,27 @@ export function App(): JSX.Element {
             <GitBranch size={18} />
             <span>RepoBinder</span>
           </div>
-          <ConnectionPill socketState={socketState} remoteEnabled={serverInfo.remoteEnabled} />
+          <ConnectionPill
+            socketState={socketState}
+            remoteEnabled={serverInfo.remoteEnabled}
+          />
         </header>
 
         <header className="contentHeader">
           <div className="titleStack">
             <p className="eyebrow">Selected Repository</p>
             <h1>{selectedRepository?.displayName ?? "Choose a Repository"}</h1>
-            <code>{selectedRepository?.primaryWorktreePath ?? "No Repository selected"}</code>
+            <code>
+              {selectedRepository?.primaryWorktreePath ??
+                "No Repository selected"}
+            </code>
           </div>
 
           <div className="headerActions">
-            <ConnectionPill socketState={socketState} remoteEnabled={serverInfo.remoteEnabled} />
+            <ConnectionPill
+              socketState={socketState}
+              remoteEnabled={serverInfo.remoteEnabled}
+            />
             <button
               className="iconButton"
               type="button"
@@ -747,9 +895,16 @@ export function App(): JSX.Element {
               disabled={isBusy}
               onClick={() => void refreshSelectedRepository()}
             >
-              <RefreshCw size={18} className={busyAction === "refresh" ? "spin" : undefined} />
+              <RefreshCw
+                size={18}
+                className={busyAction === "refresh" ? "spin" : undefined}
+              />
             </button>
-            <button className="secondaryButton" type="button" onClick={() => setActivityOpen(true)}>
+            <button
+              className="secondaryButton"
+              type="button"
+              onClick={() => setActivityOpen(true)}
+            >
               <History size={17} />
               <span>Activity</span>
             </button>
@@ -765,7 +920,7 @@ export function App(): JSX.Element {
             <button
               className="secondaryButton"
               type="button"
-              disabled={isBusy}
+              disabled={!selectedRepository || isBusy}
               onClick={openSettings}
             >
               <Settings size={17} />
@@ -785,7 +940,13 @@ export function App(): JSX.Element {
           <BannerMessage
             tone={banner.tone}
             text={banner.text}
-            icon={banner.tone === "danger" || banner.tone === "warning" ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}
+            icon={
+              banner.tone === "danger" || banner.tone === "warning" ? (
+                <AlertTriangle size={17} />
+              ) : (
+                <CheckCircle2 size={17} />
+              )
+            }
           />
         ) : null}
 
@@ -800,7 +961,10 @@ export function App(): JSX.Element {
             onRequestDelete={setDeleteTarget}
           />
         ) : (
-          <section className="emptyDashboard" aria-labelledby="choose-repository-title">
+          <section
+            className="emptyDashboard"
+            aria-labelledby="choose-repository-title"
+          >
             <FolderOpen size={44} />
             <h2 id="choose-repository-title">Choose a Repository</h2>
             {isDesktop ? (
@@ -827,16 +991,36 @@ export function App(): JSX.Element {
           isBusy={isBusy}
           onClose={() => setMobileSidebarOpen(false)}
           onAddRepository={() => void addRepository()}
-          onSelectRepository={(repositoryId, worktreeId) => void selectRepository(repositoryId, worktreeId)}
+          onOpenGlobalSettings={() => {
+            setMobileSidebarOpen(false);
+            openGlobalSettings();
+          }}
+          onSelectRepository={(repositoryId, worktreeId) =>
+            void selectRepository(repositoryId, worktreeId)
+          }
         />
       ) : null}
 
-      {activityOpen ? <ActivitySheet operations={appState.operations} onClose={() => setActivityOpen(false)} /> : null}
+      {activityOpen ? (
+        <ActivitySheet
+          operations={appState.operations}
+          onClose={() => setActivityOpen(false)}
+        />
+      ) : null}
 
-      {settingsOpen && appSettingsDraft ? (
-        <SettingsSheet
+      {globalSettingsOpen && appSettingsDraft ? (
+        <GlobalSettingsSheet
           appSettingsDraft={appSettingsDraft}
           setAppSettingsDraft={setAppSettingsDraft}
+          isBusy={isBusy}
+          isDesktop={isDesktop}
+          onClose={() => setGlobalSettingsOpen(false)}
+          onSubmit={(event) => void saveGlobalSettings(event)}
+        />
+      ) : null}
+
+      {settingsOpen && settingsDraft ? (
+        <SettingsSheet
           repositorySettingsDraft={settingsDraft}
           setRepositorySettingsDraft={setSettingsDraft}
           isBusy={isBusy}

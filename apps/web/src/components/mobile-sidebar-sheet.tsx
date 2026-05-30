@@ -12,6 +12,7 @@ export function MobileSidebarSheet(props: {
   isBusy: boolean;
   onClose: () => void;
   onAddRepository: () => void;
+  onOpenGlobalSettings: () => void;
   onSelectRepository: (repositoryId: string, worktreeId?: string) => void;
 }): JSX.Element {
   const { containerRef, onKeyDown } = useModalFocus<HTMLElement>(props.onClose);
@@ -28,7 +29,12 @@ export function MobileSidebarSheet(props: {
         onKeyDown={onKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <button className="iconButton closeButton" type="button" aria-label="Close" onClick={props.onClose}>
+        <button
+          className="iconButton closeButton"
+          type="button"
+          aria-label="Close"
+          onClick={props.onClose}
+        >
           <X size={18} />
         </button>
         <SidebarContent
@@ -38,6 +44,7 @@ export function MobileSidebarSheet(props: {
           isDesktop={props.isDesktop}
           isBusy={props.isBusy}
           onAddRepository={props.onAddRepository}
+          onOpenGlobalSettings={props.onOpenGlobalSettings}
           onSelectRepository={props.onSelectRepository}
         />
       </aside>

@@ -22,11 +22,18 @@ export function StatusDot(props: { status: "success" | "warning" | "danger" | "n
   return <span className={`statusDot ${props.status}`} aria-hidden="true" />;
 }
 
-export function Metric(props: { label: string; value: number | string }): JSX.Element {
+export function Metric(props: { label: string; value: number | string; icon?: JSX.Element }): JSX.Element {
   return (
     <div className="metric">
-      <span>{props.label}</span>
-      <strong>{props.value}</strong>
+      {props.icon ? (
+        <span className="metricIcon" aria-hidden="true">
+          {props.icon}
+        </span>
+      ) : null}
+      <span className="metricBody">
+        <span>{props.label}</span>
+        <strong>{props.value}</strong>
+      </span>
     </div>
   );
 }
