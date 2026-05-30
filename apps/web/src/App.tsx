@@ -22,8 +22,9 @@ import { RepositoryDashboard } from "@/components/repository-dashboard";
 import { SettingsSheet } from "@/components/settings-sheet";
 import { SidebarContent } from "@/components/sidebar-content";
 import { api, safeParseSocketMessage, toErrorMessage } from "@/lib/api";
-import { createSettingsDraft, parseArgsText } from "@/lib/format";
+import { createAppSettingsDraft, createSettingsDraft, parseArgsText } from "@/lib/format";
 import {
+  AppSettingsDraft,
   AppStateResource,
   Banner,
   BatchResponse,
@@ -50,6 +51,7 @@ export function App(): JSX.Element {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appSettingsDraft, setAppSettingsDraft] = useState<AppSettingsDraft | undefined>();
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | undefined>();
   const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
   const [newWorktreeContext, setNewWorktreeContext] = useState<NewWorktreeContext | undefined>();
@@ -78,6 +80,7 @@ export function App(): JSX.Element {
   const pollRef = useRef<{ busy: boolean; repositoryId?: string }>({ busy: false });
   const seenOperationIdsRef = useRef<Set<string>>(new Set());
   const operationsInitializedRef = useRef(false);
+  const appSettingsDraftInitializedRef = useRef(false);
   const settingsDraftRepositoryIdRef = useRef<string | undefined>();
   pollRef.current = { busy: isBusy, repositoryId: selectedRepository?.repositoryId };
 
@@ -197,9 +200,16 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!settingsOpen) {
+      appSettingsDraftInitializedRef.current = false;
+      setAppSettingsDraft(undefined);
       settingsDraftRepositoryIdRef.current = undefined;
       setSettingsDraft(undefined);
       return;
+    }
+
+    if (appState && !appSettingsDraftInitializedRef.current) {
+      appSettingsDraftInitializedRef.current = true;
+      setAppSettingsDraft(createAppSettingsDraft(appState.appSettings));
     }
 
     if (!selectedRepository || settingsDraftRepositoryIdRef.current === selectedRepository.repositoryId) {
@@ -208,7 +218,7 @@ export function App(): JSX.Element {
 
     settingsDraftRepositoryIdRef.current = selectedRepository.repositoryId;
     setSettingsDraft(createSettingsDraft(selectedRepository.settings));
-  }, [selectedRepository, settingsOpen]);
+  }, [appState, selectedRepository, settingsOpen]);
 
   // Light status polling for the Selected Repository so the dashboard notices
   // stale Dev Servers without aggressive polling for every Repository.
@@ -413,19 +423,21 @@ export function App(): JSX.Element {
   }
 
   function openSettings(): void {
-    if (!selectedRepository) {
+    if (!appState) {
       return;
     }
 
-    settingsDraftRepositoryIdRef.current = selectedRepository.repositoryId;
-    setSettingsDraft(createSettingsDraft(selectedRepository.settings));
+    appSettingsDraftInitializedRef.current = true;
+    setAppSettingsDraft(createAppSettingsDraft(appState.appSettings));
+    settingsDraftRepositoryIdRef.current = selectedRepository?.repositoryId;
+    setSettingsDraft(selectedRepository ? createSettingsDraft(selectedRepository.settings) : undefined);
     setSettingsOpen(true);
   }
 
   async function saveSettings(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (!selectedRepository || !settingsDraft) {
+    if (!appState || !appSettingsDraft) {
       return;
     }
 
@@ -433,21 +445,64 @@ export function App(): JSX.Element {
     setBanner(undefined);
 
     try {
-      const nextState = await api<AppStateResource>(`/api/repositories/${selectedRepository.repositoryId}/settings`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          setup: {
-            enabled: settingsDraft.setupEnabled,
-            command: settingsDraft.command,
-            defaultArgs: parseArgsText(settingsDraft.defaultArgsText),
-            autoStartDevServer: settingsDraft.autoStartDevServer,
-            tailscaleRouting: settingsDraft.tailscaleRouting,
+      const remoteModeChanged = appSettingsDraft.remoteModeEnabled !== appState.appSettings.remoteMode.enabled;
+
+      if (remoteModeChanged && (!window.repobinderDesktop || !desktopContext)) {
+        throw new Error("Desktop bridge is required for Remote Mode");
+      }
+
+      let nextState = appState;
+
+      if (selectedRepository && settingsDraft) {
+        nextState = await api<AppStateResource>(`/api/repositories/${selectedRepository.repositoryId}/settings`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            setup: {
+              enabled: settingsDraft.setupEnabled,
+              command: settingsDraft.command,
+              defaultArgs: parseArgsText(settingsDraft.defaultArgsText),
+              autoStartDevServer: settingsDraft.autoStartDevServer,
+              tailscaleRouting: settingsDraft.tailscaleRouting,
+            },
+          }),
+        });
+      }
+
+      if (remoteModeChanged) {
+        nextState = await api<AppStateResource>(
+          "/api/app-settings",
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              remoteMode: {
+                enabled: appSettingsDraft.remoteModeEnabled,
+              },
+            }),
           },
-        }),
-      });
+          desktopContext,
+        );
+      }
 
       setAppState(nextState);
       setSettingsOpen(false);
+
+      if (remoteModeChanged) {
+        const nextServerInfo = await window.repobinderDesktop?.setRemoteMode(appSettingsDraft.remoteModeEnabled);
+
+        if (nextServerInfo) {
+          setServerInfo((current) =>
+            current
+              ? {
+                  ...current,
+                  host: nextServerInfo.host,
+                  port: nextServerInfo.port,
+                  remoteEnabled: nextServerInfo.remoteEnabled,
+                }
+              : current,
+          );
+        }
+      }
+
       void refreshRepositoryForState(nextState, { silent: true });
     } catch (error) {
       setBanner({ tone: "danger", text: toErrorMessage(error) });
@@ -710,7 +765,7 @@ export function App(): JSX.Element {
             <button
               className="secondaryButton"
               type="button"
-              disabled={!selectedRepository || isBusy}
+              disabled={isBusy}
               onClick={openSettings}
             >
               <Settings size={17} />
@@ -778,10 +833,12 @@ export function App(): JSX.Element {
 
       {activityOpen ? <ActivitySheet operations={appState.operations} onClose={() => setActivityOpen(false)} /> : null}
 
-      {settingsOpen && selectedRepository && settingsDraft ? (
+      {settingsOpen && appSettingsDraft ? (
         <SettingsSheet
-          settingsDraft={settingsDraft}
-          setSettingsDraft={setSettingsDraft}
+          appSettingsDraft={appSettingsDraft}
+          setAppSettingsDraft={setAppSettingsDraft}
+          repositorySettingsDraft={settingsDraft}
+          setRepositorySettingsDraft={setSettingsDraft}
           isBusy={isBusy}
           isDesktop={isDesktop}
           onClose={() => setSettingsOpen(false)}

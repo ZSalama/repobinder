@@ -1,4 +1,5 @@
 import {
+  AppSettingsRecord,
   createDefaultRepositorySettings,
   OperationRecord,
   RepositoryRecord,
@@ -29,6 +30,7 @@ export type StoreMetaResource = {
 export type AppStateResource = {
   schemaVersion: typeof STORE_SCHEMA_VERSION;
   selection: SelectionRecord;
+  appSettings: AppSettingsRecord;
   repositories: RepositoryResource[];
   operations: OperationRecord[];
 };
@@ -43,6 +45,7 @@ export function buildAppStateResource(store: RepoBinderStore, options: ResourceO
   return {
     schemaVersion: store.schemaVersion,
     selection: resolveVisibleSelection(store.selection, repositories),
+    appSettings: store.appSettings,
     repositories,
     operations: [...store.operations].reverse(),
   };

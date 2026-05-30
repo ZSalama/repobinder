@@ -4,11 +4,68 @@ import { buildAppStateResource, buildRepositoryResource, buildRepositoryResource
 import { findVisibleRepository, localStore, recordOperationSafely, runExclusiveMutation } from "../context";
 import { ApiError, toApiError } from "../lib/errors";
 import { compactJsonObject, nowIso } from "../lib/json";
-import { readRepositorySettingsBody, readResourceOptions, readRouteParam } from "../lib/request";
+import {
+  readAppSettingsBody,
+  readRepositorySettingsBody,
+  readResourceOptions,
+  readRouteParam,
+  requireDesktopAuth,
+} from "../lib/request";
 import { broadcast } from "../sockets";
 import { appendOperationRecord, RepositorySettingsRecord } from "../store";
 
 export const settingsRouter = Router();
+
+settingsRouter.get("/api/app-settings", async (_request, response, next) => {
+  try {
+    const store = await localStore.read();
+
+    response.json({ appSettings: store.appSettings });
+  } catch (error) {
+    next(error);
+  }
+});
+
+settingsRouter.patch("/api/app-settings", async (request, response, next) => {
+  try {
+    requireDesktopAuth(request);
+
+    const currentStore = await localStore.read();
+    const nextSettings = readAppSettingsBody(request.body, currentStore.appSettings);
+
+    const state = await runExclusiveMutation("app-settings.update", async () =>
+      localStore.update((mutableStore) => {
+        mutableStore.appSettings = nextSettings;
+
+        appendOperationRecord(mutableStore, {
+          type: "app-settings.update",
+          status: "success",
+          severity: "success",
+          summary: "App Settings saved",
+          details: compactJsonObject({
+            remoteModeEnabled: nextSettings.remoteMode.enabled,
+          }),
+        });
+
+        return buildAppStateResource(mutableStore);
+      }),
+    );
+
+    broadcast({ type: "state.changed", reason: "app-settings.update" });
+    response.json(state);
+  } catch (error) {
+    await recordOperationSafely({
+      type: "app-settings.update",
+      status: "failed",
+      severity: "error",
+      summary: "App Settings save failed",
+      details: compactJsonObject({
+        error: toApiError(error).message,
+      }),
+    });
+    next(error);
+  }
+});
 
 settingsRouter.get("/api/repository-settings", async (request, response, next) => {
   try {

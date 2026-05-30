@@ -969,6 +969,29 @@ button:focus-visible {
   padding: 18px;
 }
 
+.settingsSection {
+  display: grid;
+  gap: 13px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settingsSection:last-of-type {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.settingsSectionHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.settingsSectionHeader h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.2;
+}
+
 .activitySheet {
   width: min(620px, 100%);
 }
@@ -1159,6 +1182,20 @@ button:focus-visible {
   width: 18px;
   min-height: 18px;
   accent-color: var(--green);
+}
+
+.settingsWarning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid rgb(241 191 98 / 24%);
+  border-radius: 8px;
+  color: var(--amber);
+  background: rgb(241 191 98 / 9%);
+  font-size: 0.84rem;
+  line-height: 1.35;
 }
 
 .sheetLoading {

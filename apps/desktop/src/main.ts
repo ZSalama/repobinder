@@ -1,5 +1,6 @@
 import { ChildProcess, spawn } from "node:child_process";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
@@ -26,6 +27,7 @@ let isQuitting = false;
 let mainWindow: BrowserWindow | undefined;
 let currentConfig: BackendConfig | undefined;
 const desktopToken = crypto.randomUUID();
+const intentionalBackendStops = new WeakSet<ChildProcess>();
 
 app.setName("RepoBinder");
 process.env.REPOBINDER_DESKTOP_TOKEN = desktopToken;
@@ -44,6 +46,20 @@ ipcMain.handle("repobinder:get-desktop-context", () => ({
   platform: process.platform,
   desktopAuthToken: desktopToken,
 }));
+
+ipcMain.handle("repobinder:set-remote-mode", async (_event, enabled: unknown) => {
+  if (typeof enabled !== "boolean") {
+    throw new Error("Remote mode must be enabled or disabled");
+  }
+
+  const config = await applyRemoteMode(enabled);
+
+  return {
+    host: config.host,
+    port: config.port,
+    remoteEnabled: config.remoteEnabled,
+  };
+});
 
 // Open Dev copies the Worktree's Dev Server URL from the desktop shell.
 // Only loopback URLs are accepted so repository scripts cannot turn RepoBinder
@@ -69,7 +85,7 @@ app.whenReady().then(startDesktopApp).catch((error) => {
 
 app.on("before-quit", () => {
   isQuitting = true;
-  stopBackend();
+  void stopBackend();
 });
 
 app.on("window-all-closed", () => {
@@ -85,7 +101,7 @@ app.on("activate", async () => {
 });
 
 async function startDesktopApp(): Promise<void> {
-  const remoteEnabled = isRemoteEnabled();
+  const remoteEnabled = await getInitialRemoteMode();
   const host = getBindHost(remoteEnabled);
   const port = await findAvailablePort(getPreferredPort(), host);
   const localUrl = new URL(`http://${LOCALHOST}:${port}`);
@@ -102,6 +118,37 @@ async function startDesktopApp(): Promise<void> {
   mainWindow = createWindow(localUrl.href);
 
   logExposure(currentConfig);
+}
+
+async function applyRemoteMode(remoteEnabled: boolean): Promise<BackendConfig> {
+  const host = getBindHost(remoteEnabled);
+
+  if (currentConfig && currentConfig.host === host && currentConfig.remoteEnabled === remoteEnabled) {
+    return currentConfig;
+  }
+
+  const preferredPort = currentConfig?.port ?? getPreferredPort();
+
+  await stopBackend({ wait: true });
+
+  const port = await findAvailablePort(preferredPort, host);
+  const localUrl = new URL(`http://${LOCALHOST}:${port}`);
+  const nextConfig: BackendConfig = {
+    host,
+    localUrl,
+    port,
+    remoteEnabled,
+  };
+
+  currentConfig = nextConfig;
+  backendProcess = startBackend(nextConfig);
+  await waitForHttpReady(new URL("/health", localUrl).href, READY_TIMEOUT_MS);
+  setTimeout(() => {
+    mainWindow?.loadURL(localUrl.href).catch((error) => console.error(error));
+  }, 0);
+  logExposure(nextConfig);
+
+  return nextConfig;
 }
 
 function createWindow(appUrl: string): BrowserWindow {
@@ -157,61 +204,102 @@ function startBackend(config: BackendConfig): ChildProcess {
   });
 
   child.on("exit", (code, signal) => {
-    if (isQuitting || signal === "SIGTERM") {
+    if (isQuitting || signal === "SIGTERM" || intentionalBackendStops.delete(child)) {
       return;
     }
 
     console.error(`Backend exited unexpectedly: code=${code ?? "null"} signal=${signal ?? "null"}`);
-    backendProcess = undefined;
-    scheduleBackendRestart();
+
+    if (backendProcess === child) {
+      backendProcess = undefined;
+      scheduleBackendRestart();
+    }
   });
 
   child.on("error", (error) => {
-    if (isQuitting) {
+    if (isQuitting || intentionalBackendStops.has(child)) {
       return;
     }
 
     console.error(error);
-    backendProcess = undefined;
-    scheduleBackendRestart();
+
+    if (backendProcess === child) {
+      backendProcess = undefined;
+      scheduleBackendRestart();
+    }
   });
 
   return child;
 }
 
-function stopBackend(): void {
+function stopBackend(options: { wait?: boolean } = {}): Promise<void> {
   if (backendRestartTimer) {
     clearTimeout(backendRestartTimer);
     backendRestartTimer = undefined;
   }
 
-  if (!backendProcess || backendProcess.killed) {
-    return;
+  if (!backendProcess) {
+    return Promise.resolve();
   }
 
-  backendProcess.kill("SIGTERM");
+  const child = backendProcess;
   backendProcess = undefined;
+  intentionalBackendStops.add(child);
+
+  if (!options.wait) {
+    child.kill("SIGTERM");
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const timeout = setTimeout(done, 5_000);
+
+    function done(): void {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      child.off("exit", done);
+      resolve();
+    }
+
+    child.once("exit", done);
+
+    if (!child.kill("SIGTERM")) {
+      done();
+    }
+  });
 }
 
 function scheduleBackendRestart(): void {
-  if (!currentConfig || backendRestartTimer) {
+  if (!currentConfig || backendRestartTimer || backendProcess) {
     return;
   }
 
   backendRestartTimer = setTimeout(() => {
     backendRestartTimer = undefined;
 
-    if (!currentConfig || isQuitting) {
+    if (!currentConfig || isQuitting || backendProcess) {
       return;
     }
 
     const config = currentConfig;
-    backendProcess = startBackend(config);
+    const child = startBackend(config);
+    backendProcess = child;
     waitForHttpReady(new URL("/health", config.localUrl).href, READY_TIMEOUT_MS)
       .then(() => mainWindow?.loadURL(config.localUrl.href))
       .catch((error: unknown) => {
         console.error(error);
-        scheduleBackendRestart();
+
+        if (backendProcess !== child) {
+          scheduleBackendRestart();
+          return;
+        }
+
+        void stopBackend({ wait: true }).then(() => scheduleBackendRestart());
       });
   }, 1_000);
 }
@@ -240,8 +328,39 @@ function resolveWebDist(): string {
   return path.resolve(__dirname, "..", "..", "dist-web");
 }
 
-function isRemoteEnabled(): boolean {
+async function getInitialRemoteMode(): Promise<boolean> {
+  if (isRemoteLaunchOverrideEnabled()) {
+    return true;
+  }
+
+  return readStoredRemoteModeEnabled();
+}
+
+function isRemoteLaunchOverrideEnabled(): boolean {
   return process.env.REPOBINDER_REMOTE === "1" || process.argv.includes("--remote");
+}
+
+async function readStoredRemoteModeEnabled(): Promise<boolean> {
+  try {
+    const rawStore = await fs.readFile(resolveDesktopStorePath(), "utf8");
+    const store = JSON.parse(rawStore) as unknown;
+
+    if (!isRecord(store) || !isRecord(store.appSettings) || !isRecord(store.appSettings.remoteMode)) {
+      return false;
+    }
+
+    return store.appSettings.remoteMode.enabled === true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function resolveDesktopStorePath(): string {
+  return path.join(app.getPath("userData"), "repobinder-store.json");
 }
 
 function getBindHost(remoteEnabled: boolean): string {
@@ -372,4 +491,12 @@ function getRemoteUrls(port: number): string[] {
   }
 
   return urls;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isNodeError(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error;
 }

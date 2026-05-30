@@ -1,4 +1,18 @@
-import { DevServerStatus, RepositorySettings, SettingsDraft, SetupStatus, WorktreeResource } from "@/types";
+import {
+  AppSettings,
+  AppSettingsDraft,
+  DevServerStatus,
+  RepositorySettings,
+  SettingsDraft,
+  SetupStatus,
+  WorktreeResource,
+} from "@/types";
+
+export function createAppSettingsDraft(settings: AppSettings): AppSettingsDraft {
+  return {
+    remoteModeEnabled: settings.remoteMode.enabled,
+  };
+}
 
 export function createSettingsDraft(settings: RepositorySettings): SettingsDraft {
   return {

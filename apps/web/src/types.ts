@@ -48,6 +48,14 @@ export type RepositorySettings = {
   updatedAt: string;
 };
 
+export type AppSettings = {
+  remoteMode: {
+    enabled: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type WorktreeResource = {
   worktreeId: string;
   repositoryId: string;
@@ -114,6 +122,7 @@ export type AppStateResource = {
     worktreeId?: string;
     updatedAt?: string;
   };
+  appSettings: AppSettings;
   repositories: RepositoryResource[];
   operations: OperationRecord[];
 };
@@ -226,6 +235,10 @@ export type SettingsDraft = {
   tailscaleRouting: boolean;
 };
 
+export type AppSettingsDraft = {
+  remoteModeEnabled: boolean;
+};
+
 export type Banner = {
   tone: "success" | "warning" | "danger" | "info";
   text: string;
@@ -237,6 +250,7 @@ declare global {
       getDesktopContext: () => Promise<DesktopContext>;
       pickRepositoryFolder: () => Promise<string | undefined>;
       copyDevServerUrl: (url: string) => Promise<boolean>;
+      setRemoteMode: (enabled: boolean) => Promise<{ host: string; port: number; remoteEnabled: boolean }>;
     };
   }
 }

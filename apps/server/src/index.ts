@@ -50,6 +50,16 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 
 attachSockets(server);
 
+server.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`RepoBinder backend could not listen on ${host}:${port} because the address is already in use.`);
+  } else {
+    console.error(error);
+  }
+
+  process.exit(1);
+});
+
 server.listen(port, host, () => {
   const urls = getAdvertisedUrls(host, port).join(", ");
   console.log(`RepoBinder backend listening on ${host}:${port}`);

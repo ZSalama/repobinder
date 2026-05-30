@@ -28,7 +28,7 @@ Current release builds are unsigned. Windows SmartScreen and macOS Gatekeeper ma
 
 RepoBinder is designed to run on a developer machine and binds to `127.0.0.1` by default.
 
-Remote or LAN access is opt-in through `REPOBINDER_REMOTE=1` for the desktop app, or `HOST=0.0.0.0` for the standalone backend. Browser clients in remote mode are not authenticated yet, so use remote mode only on trusted networks. Add authentication before exposing RepoBinder to an untrusted network.
+Remote or LAN access is opt-in through Remote Mode in the desktop app's App Settings, `REPOBINDER_REMOTE=1` for the desktop app, or `HOST=0.0.0.0` for the standalone backend. Browser clients in remote mode are not authenticated yet, so use remote mode only on trusted networks. Add authentication before exposing RepoBinder to an untrusted network.
 
 Worktree Setup Scripts run local commands inside your worktrees. Review scripts before enabling setup automation for a Repository.
 
@@ -63,7 +63,7 @@ To bind the backend to all interfaces:
 HOST=0.0.0.0 PORT=3774 pnpm run start
 ```
 
-For desktop remote mode:
+For desktop remote mode, enable Remote Mode in App Settings or launch with:
 
 ```sh
 pnpm run dev:remote

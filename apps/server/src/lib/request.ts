@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { Request } from "express";
 
-import { RepositorySettingsRecord } from "../store";
+import { AppSettingsRecord, RepositorySettingsRecord } from "../store";
 import { ApiError } from "./errors";
 import { nowIso } from "./json";
 
@@ -130,6 +130,22 @@ export function readNewWorktreeRequest(body: unknown): NewWorktreeRequest {
 
 export function argsContainPort(args: string[]): boolean {
   return args.some((arg) => arg === "--port" || arg.startsWith("--port="));
+}
+
+export function readAppSettingsBody(body: unknown, previousSettings: AppSettingsRecord): AppSettingsRecord {
+  if (!isRecord(body) || !isRecord(body.remoteMode)) {
+    throw new ApiError(400, "Missing remote mode settings");
+  }
+
+  const timestamp = nowIso();
+
+  return {
+    remoteMode: {
+      enabled: Boolean(body.remoteMode.enabled),
+    },
+    createdAt: previousSettings.createdAt,
+    updatedAt: timestamp,
+  };
 }
 
 export async function readRepositorySettingsBody(

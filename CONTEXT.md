@@ -20,6 +20,10 @@ _Avoid_: Project record
 Local configuration attached to a Repository Record, including whether a Worktree Setup Script should run for newly created Linked Worktrees.
 _Avoid_: Project settings
 
+**App Settings**:
+Local configuration attached to the RepoBinder app on one machine rather than to a specific Repository Record. App Settings affect the behavior of RepoBinder itself.
+_Avoid_: Global Repository Settings
+
 **Worktree**:
 A filesystem checkout attached to a Repository. A Worktree has exactly one Worktree Path and may have a Branch checked out.
 _Avoid_: Workspace, clone, copy
@@ -79,6 +83,10 @@ _Avoid_: Dev environment when referring to the running process
 **Tailscale Routing**:
 A Repository Setting that asks Auto Start Dev Server to make the Dev Server reachable from devices already connected to the same tailnet as the RepoBinder machine. RepoBinder does not configure Tailscale itself.
 _Avoid_: Remote mode when referring only to Dev Server reachability
+
+**Remote Mode**:
+An App Setting or launch option that makes RepoBinder reachable from other devices on the network by binding the backend to `0.0.0.0` instead of `127.0.0.1`.
+_Avoid_: Tailscale Routing when referring to RepoBinder app reachability
 
 **Tracked Process**:
 A local process id reported by a Worktree Setup Script and stored by RepoBinder for status checks and cleanup. A Worktree may have multiple Tracked Processes, with at most one primary Dev Server.

@@ -43,6 +43,14 @@ export type RepositorySettingsRecord = {
   updatedAt: string;
 };
 
+export type AppSettingsRecord = {
+  remoteMode: {
+    enabled: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type WorktreeRecord = {
   worktreeId: string;
   repositoryId: string;
@@ -118,6 +126,7 @@ export type RepoBinderStore = {
   createdAt: string;
   updatedAt: string;
   selection: SelectionRecord;
+  appSettings: AppSettingsRecord;
   repositories: RepositoryRecord[];
   repositorySettings: RepositorySettingsRecord[];
   worktrees: WorktreeRecord[];
@@ -229,6 +238,16 @@ export function createDefaultRepositorySettings(repositoryId: string, timestamp 
   };
 }
 
+export function createDefaultAppSettings(timestamp = nowIso()): AppSettingsRecord {
+  return {
+    remoteMode: {
+      enabled: false,
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 export function appendOperationRecord(store: RepoBinderStore, input: CreateOperationInput): OperationRecord {
   const timestamp = nowIso();
   const operation: OperationRecord = {
@@ -256,6 +275,7 @@ function createEmptyStore(timestamp: string): RepoBinderStore {
     createdAt: timestamp,
     updatedAt: timestamp,
     selection: {},
+    appSettings: createDefaultAppSettings(timestamp),
     repositories: [],
     repositorySettings: [],
     worktrees: [],
@@ -284,11 +304,28 @@ function normalizeStoreV1(document: Record<string, unknown>): RepoBinderStore {
     createdAt: readString(document.createdAt) ?? timestamp,
     updatedAt: readString(document.updatedAt) ?? timestamp,
     selection: readSelection(document.selection),
+    appSettings: readAppSettings(document.appSettings, timestamp),
     repositories: readArray<RepositoryRecord>(document.repositories),
     repositorySettings: normalizeRepositorySettings(readArray<RepositorySettingsRecord>(document.repositorySettings)),
     worktrees: readArray<WorktreeRecord>(document.worktrees),
     trackedProcesses: readArray<TrackedProcessRecord>(document.trackedProcesses),
     operations: readArray<OperationRecord>(document.operations).slice(-OPERATION_RETENTION_LIMIT),
+  };
+}
+
+function readAppSettings(value: unknown, timestamp: string): AppSettingsRecord {
+  if (!isRecord(value)) {
+    return createDefaultAppSettings(timestamp);
+  }
+
+  const remoteMode = isRecord(value.remoteMode) ? value.remoteMode : {};
+
+  return {
+    remoteMode: {
+      enabled: Boolean(remoteMode.enabled),
+    },
+    createdAt: readString(value.createdAt) ?? timestamp,
+    updatedAt: readString(value.updatedAt) ?? timestamp,
   };
 }
 
